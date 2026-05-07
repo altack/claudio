@@ -39,11 +39,15 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
   const [pendingTier, setPendingTier] = useState<Tier | null>(null);
   const [range, setRange] = useState<Range>("7d");
   const [chatModel, setChatModel] = useState<string | null>(null);
-  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+  // Initialised to 0 (not Date.now()) so SSR and the first client render
+  // produce the same HTML — otherwise hydration mismatches (React #418).
+  // The real value is set in useEffect, after hydration.
+  const [nowSec, setNowSec] = useState(0);
   const cancelledRef = useRef(false);
 
   // Tick every 30s — only used to update relative time labels (refresh in N).
   useEffect(() => {
+    setNowSec(Math.floor(Date.now() / 1000));
     const id = setInterval(
       () => setNowSec(Math.floor(Date.now() / 1000)),
       30_000,
@@ -199,7 +203,18 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
     <main className="mx-auto w-full max-w-[920px] px-6 py-10 min-h-screen flex flex-col">
       <header className="mb-12 flex items-baseline justify-between border-b border-hairline pb-4">
         <div className="flex items-baseline gap-4">
-          <span className="text-fg">claudio</span>
+          <span className="flex items-baseline gap-2 text-fg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/claudio-logo.svg"
+              alt=""
+              aria-hidden
+              width={16}
+              height={16}
+              className="self-center"
+            />
+            claudio
+          </span>
           <span className="flex items-baseline gap-2 text-muted">
             <StatusDot tone={overallTone} />
             <span
@@ -957,6 +972,11 @@ function RecentRow({ call }: { call: { ts: string; model: string; total_tokens: 
       <span
         style={{ width: "10ch" }}
         className="shrink-0 text-muted tabular-nums"
+        // Server formats in the container's timezone (UTC); client uses the
+        // user's local zone. The value is "correct" on both sides, just
+        // differently rendered — suppress the hydration warning rather than
+        // forcing UTC everywhere.
+        suppressHydrationWarning
       >
         {time}
       </span>
@@ -1009,6 +1029,9 @@ function formatLatency(ms: number): string {
 }
 
 function formatRelative(ts: string, nowSec: number): string {
+  // nowSec is 0 during SSR / first client render to avoid hydration mismatch;
+  // show a stable placeholder until the post-mount tick fills it in.
+  if (nowSec === 0) return "—";
   const t = Date.parse(ts);
   if (!Number.isFinite(t)) return "—";
   const diff = nowSec - Math.floor(t / 1000);

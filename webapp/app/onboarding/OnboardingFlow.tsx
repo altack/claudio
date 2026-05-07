@@ -142,7 +142,18 @@ export default function OnboardingFlow() {
     <main className="mx-auto flex min-h-screen w-full max-w-[640px] flex-col px-6 py-10">
       <header className="mb-12 flex items-baseline justify-between border-b border-hairline pb-4">
         <div className="flex items-baseline gap-3">
-          <span className="text-fg">claudio</span>
+          <span className="flex items-baseline gap-2 text-fg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/claudio-logo.svg"
+              alt=""
+              aria-hidden
+              width={24}
+              height={24}
+              className="self-center"
+            />
+            claudio
+          </span>
           <span className="text-muted">/</span>
           <span className="text-muted">authorize</span>
         </div>
