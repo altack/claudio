@@ -108,6 +108,49 @@
   margin-right: 6px;
 }
 
+/* Morphing square loader — the project's standard "we're working" mark.
+   Same 6–8px solid-square language as .dot / StatusDot, but it dances:
+   squash, stretch, hop, full 360° spin, four-color cycle. Layout-stable:
+   outer box is a fixed 18×18, inner span morphs via transform only. */
+.square-loader {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  position: relative;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.square-loader__inner {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  transform-origin: center center;
+  animation: square-morph 2.4s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+  will-change: transform, background-color;
+}
+@keyframes square-morph {
+  0%   { transform: translateY(0)    scale(1, 1);                          background: var(--accent); }
+  8%   { transform: translateY(3px)  scale(1.7, 0.35);                     background: var(--accent); }   /* splat */
+  18%  { transform: translateY(-5px) scale(0.5, 1.7);                      background: var(--ok);     }   /* spring up */
+  28%  { transform: translateY(0)    scale(1, 1)        rotate(45deg);     background: var(--ok);     }   /* land as diamond */
+  42%  { transform: translateY(0)    scale(0.5, 0.5)    rotate(90deg);     background: var(--warn);   }   /* shrink */
+  55%  { transform: translateY(0)    scale(1.4, 1.4)    rotate(180deg);    background: var(--warn);   }   /* expand */
+  68%  { transform: translateY(2px)  scale(1.6, 0.45)   rotate(225deg);    background: var(--err);    }   /* squash diagonally */
+  82%  { transform: translateY(-4px) scale(0.45, 1.6)   rotate(315deg);    background: var(--err);    }   /* spring diagonally */
+  92%  { transform: translateY(-2px) scale(1.2, 0.8)    rotate(360deg);    background: var(--accent); }   /* hop home */
+  100% { transform: translateY(0)    scale(1, 1)        rotate(360deg);    background: var(--accent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .square-loader__inner {
+    animation: none;
+    background: var(--accent);
+    opacity: 0.7;
+  }
+}
+
 /* Section header — index label + title. Used for PROCESSES, USAGE, etc. */
 .section-h {
   display: flex;

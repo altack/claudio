@@ -68,6 +68,44 @@ export ANTHROPIC_DEFAULT_OPUS_MODEL=$opus_default
 export ANTHROPIC_DEFAULT_SONNET_MODEL=$sonnet_default
 export ANTHROPIC_DEFAULT_HAIKU_MODEL=$haiku_default
 
-# claude is in PATH already (Claude Code installs itself globally). exec so
-# signals propagate cleanly to the child.
-exec claude "$@"
+# Heartbeat to the webapp so the dashboard can show "claudio running" while
+# this script is alive. Soft-fails if the webapp is down; the proxy is what
+# actually matters and was already smoke-tested above.
+session_id=$(cat /proc/sys/kernel/random/uuid 2>/dev/null \
+  || uuidgen 2>/dev/null \
+  || printf '%s-%s' "$$" "$(date +%s)")
+webapp_base='http://127.0.0.1:3000'
+
+heartbeat_post() {
+  curl -fsS --max-time 2 -X POST -H 'Content-Type: application/json' \
+    -d "{\"id\":\"$session_id\"}" "$webapp_base/api/session/heartbeat" \
+    >/dev/null 2>&1 || true
+}
+heartbeat_post
+
+# Capture parent PID so the subshell can die if we get SIGKILL'd (the trap
+# below won't fire in that case).
+parent_pid=$$
+(
+  while sleep 10; do
+    kill -0 "$parent_pid" 2>/dev/null || exit 0
+    heartbeat_post
+  done
+) &
+hb_pid=$!
+
+cleanup() {
+  if [[ -n "${hb_pid:-}" ]]; then
+    kill "$hb_pid" 2>/dev/null || true
+    wait "$hb_pid" 2>/dev/null || true
+  fi
+  curl -fsS --max-time 1 -X POST -H 'Content-Type: application/json' \
+    -d "{\"id\":\"$session_id\"}" "$webapp_base/api/session/end" \
+    >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+# claude is in PATH already (Claude Code installs itself globally). Don't
+# exec — we need the shell to stick around to run cleanup. Bash forwards
+# SIGINT/SIGTERM to the foreground child, so signals still reach claude.
+claude "$@"

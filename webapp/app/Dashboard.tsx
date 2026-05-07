@@ -33,6 +33,7 @@ type DashboardState = {
   usage: UsageSummary;
   models: ModelMapping[];
   models_error: string | null;
+  sessions: { active: number };
 };
 
 const POLL_MS = 5_000;
@@ -215,21 +216,21 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
 
   return (
     <main className="mx-auto w-full max-w-[920px] px-6 py-10 min-h-screen flex flex-col">
-      <header className="mb-12 flex items-baseline justify-between border-b border-hairline pb-4">
-        <div className="flex items-baseline gap-4">
-          <span className="flex items-baseline gap-2 text-fg">
+      <header className="mb-12 flex items-center justify-between border-b border-hairline pb-4">
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-2 text-fg">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/claudio-logo.svg"
               alt=""
               aria-hidden
-              width={16}
-              height={16}
+              width={24}
+              height={24}
               className="self-center"
             />
             claudio
           </span>
-          <span className="flex items-baseline gap-2 text-muted">
+          <span className="flex items-center gap-2 text-muted">
             <StatusDot tone={overallTone} />
             <span
               className={
@@ -263,18 +264,18 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
           metric={`${formatN(state.usage.requests_24h)} req/24h`}
         />
         <ProcessRow
-          name="webapp"
-          tone="ok"
-          stateLabel="up"
-          address="127.0.0.1:3000"
-          metric=""
-        />
-        <ProcessRow
           name="copilot"
           tone={copilotStatus.tone}
           stateLabel={copilotStatus.label}
           address=""
           metric={copilotMetric}
+        />
+        <ProcessRow
+          name="claudio"
+          tone={state.sessions.active > 0 ? "ok" : "off"}
+          stateLabel={state.sessions.active > 0 ? "running" : "stopped"}
+          address=""
+          metric={`${state.sessions.active} session${state.sessions.active === 1 ? "" : "s"}`}
         />
       </Section>
 

@@ -82,6 +82,31 @@ foreach ($name in $envNames) {
     $envSnapshot[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 
+# Heartbeat to the webapp so the dashboard can show "claudio running" while
+# this script is alive. Soft-fails if the webapp is down — main flow already
+# smoke-tested LiteLLM, which is what actually matters.
+$sessionId = [guid]::NewGuid().ToString()
+$webappBase = 'http://127.0.0.1:3000'
+$heartbeatJob = $null
+try {
+    $null = Invoke-RestMethod -Uri "$webappBase/api/session/heartbeat" `
+        -Method Post -TimeoutSec 2 -ContentType 'application/json' `
+        -Body (ConvertTo-Json @{ id = $sessionId }) -ErrorAction Stop
+    $heartbeatJob = Start-Job -ScriptBlock {
+        param($id, $base)
+        while ($true) {
+            Start-Sleep -Seconds 10
+            try {
+                Invoke-RestMethod -Uri "$base/api/session/heartbeat" `
+                    -Method Post -TimeoutSec 2 -ContentType 'application/json' `
+                    -Body (ConvertTo-Json @{ id = $id }) -ErrorAction Stop | Out-Null
+            } catch {}
+        }
+    } -ArgumentList $sessionId, $webappBase
+} catch {
+    # webapp unreachable; dashboard just won't show this session
+}
+
 $exitCode = 0
 try {
     $env:ANTHROPIC_BASE_URL  = 'http://127.0.0.1:4000'
@@ -102,6 +127,17 @@ try {
     # which leaves an empty-string entry behind).
     foreach ($name in $envNames) {
         [Environment]::SetEnvironmentVariable($name, $envSnapshot[$name], 'Process')
+    }
+    if ($heartbeatJob) {
+        Stop-Job   -Job $heartbeatJob -ErrorAction SilentlyContinue
+        Remove-Job -Job $heartbeatJob -Force -ErrorAction SilentlyContinue
+    }
+    try {
+        $null = Invoke-RestMethod -Uri "$webappBase/api/session/end" `
+            -Method Post -TimeoutSec 1 -ContentType 'application/json' `
+            -Body (ConvertTo-Json @{ id = $sessionId }) -ErrorAction Stop
+    } catch {
+        # session will age out from the webapp's heartbeat map within ~30s anyway
     }
 }
 exit $exitCode

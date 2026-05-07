@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { SquareLoader } from "@/components/SquareLoader";
 
 type DeviceCode = {
   user_code: string;
@@ -140,9 +141,9 @@ export default function OnboardingFlow() {
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[640px] flex-col px-6 py-10">
-      <header className="mb-12 flex items-baseline justify-between border-b border-hairline pb-4">
-        <div className="flex items-baseline gap-3">
-          <span className="flex items-baseline gap-2 text-fg">
+      <header className="mb-12 flex items-center justify-between border-b border-hairline pb-4">
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-2 text-fg">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/claudio-logo.svg"
@@ -226,7 +227,7 @@ function IntroState({
       <ul className="space-y-2 text-muted">
         <li>
           <span className="text-ok">●</span>{" "}
-          <span className="text-fg">use claude</span> on anthropic&apos;s
+          <span className="text-fg">use claude </span>on anthropic&apos;s
           models, paid via your copilot plan
         </li>
         <li>
@@ -303,11 +304,7 @@ function DeviceCodeState({
         >
           reopen github
         </button>
-        <PollIndicator
-          status={pollStatus}
-          intervalSec={code.interval}
-          secondsLeft={secondsLeft}
-        />
+        <PollIndicator status={pollStatus} secondsLeft={secondsLeft} />
       </div>
 
       <div className="text-right">
@@ -325,34 +322,21 @@ function DeviceCodeState({
 
 function PollIndicator({
   status,
-  intervalSec,
   secondsLeft,
 }: {
   status: PollStatus;
-  intervalSec: number;
   secondsLeft: number | null;
 }) {
   return (
-    <div className="text-muted">
-      <span
-        aria-hidden
-        style={{
-          background: status === "pending" ? "var(--accent)" : "var(--dim)",
-          display: "inline-block",
-          width: 6,
-          height: 6,
-          marginRight: 8,
-        }}
-        className={status === "pending" ? "animate-pulse" : ""}
-      />
-      polling every {intervalSec}s
+    <div className="flex items-center gap-2 text-muted">
+      {status === "pending" ? <SquareLoader title="waiting for github" /> : null}
       {secondsLeft != null && secondsLeft > 0 ? (
-        <>
-          {" "}· expires in{" "}
+        <span>
+          expires in{" "}
           <span className="text-fg tabular-nums">
             {formatCountdown(secondsLeft)}
           </span>
-        </>
+        </span>
       ) : null}
     </div>
   );

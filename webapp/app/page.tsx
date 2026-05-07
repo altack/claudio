@@ -7,6 +7,7 @@ import { health, listModels } from "@/lib/litellm";
 import { readAuthSnapshot } from "@/lib/copilot-auth";
 import { readPreferences } from "@/lib/preferences";
 import { getUsageSummary } from "@/lib/usage";
+import { activeSessionCount } from "@/lib/sessions";
 import Dashboard from "./Dashboard";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +39,7 @@ export default async function HomePage() {
         usage,
         models: modelsResult.ok ? modelsResult.models : [],
         models_error: modelsResult.ok ? null : modelsResult.error,
+        sessions: { active: activeSessionCount() },
       }}
     />
   );
