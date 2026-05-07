@@ -1,0 +1,43 @@
+# Works with both `podman compose up` and `docker compose up`.
+# Single-image, single-container design. Each developer runs their own copy
+# locally; nothing here is meant to be shared on a network.
+services:
+  claudex:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: claudex:local
+    container_name: claudex
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"   # control webapp (bind to loopback only)
+      - "127.0.0.1:4000:4000"   # LiteLLM proxy (bind to loopback only)
+    # List form (not map) on purpose: bare `- VAR` references are forwarded
+    # ONLY if the variable is actually set in .env / the host shell. With
+    # map form `VAR: ${VAR:-}` we'd forward `VAR=` (empty string) when unset,
+    # and LiteLLM's `os.getenv("VAR", DEFAULT)` would return the empty string
+    # (defaults only kick in when truly unset), causing httpx to fail with
+    # "Request URL is missing an 'http://' or 'https://' protocol."
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      - GITHUB_COPILOT_TOKEN_DIR=/data/copilot
+      # Optional GHE overrides; only forwarded when set in .env / shell.
+      - GITHUB_COPILOT_API_BASE
+      - GITHUB_COPILOT_DEVICE_CODE_URL
+      - GITHUB_COPILOT_ACCESS_TOKEN_URL
+      - GITHUB_COPILOT_API_KEY_URL
+    volumes:
+      # Named volumes only - bind mounts on Podman+Windows are unreliable
+      # because of WSL2 path translation and rootless permission mapping.
+      - claudex_copilot:/data/copilot
+      # Spend log JSONL written by litellm/spend_logger.py and read by
+      # the webapp's /spend page. Survives `compose down`; `down -v` drops it.
+      - claudex_litellm:/data/litellm
+      # User preferences (default model per tier) edited from the webapp
+      # and read by scripts/claudex.ps1 over HTTP on each invocation.
+      - claudex_app:/data/claudex
+
+volumes:
+  claudex_copilot:
+  claudex_litellm:
+  claudex_app:
