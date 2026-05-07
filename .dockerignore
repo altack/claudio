@@ -1,0 +1,12 @@
+**/node_modules
+**/.next
+**/.git
+**/.env
+**/.env.local
+**/dist
+**/build
+**/*.log
+data/
+scripts/
+README.md
+.gitignore
