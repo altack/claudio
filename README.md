@@ -1,6 +1,14 @@
 # claudio
 
-Run Claude Code (the harness) against your **GitHub Copilot subscription** instead of the Anthropic API. Each developer runs a small local container that exposes a [LiteLLM](https://docs.litellm.ai/) proxy translating Anthropic's Messages API to Copilot's OpenAI-shaped backend, plus a Next.js control panel for OAuth, model selection, and shadow-cost tracking.
+**Claude Code for the rest of us.**
+
+Your company did the math: a GitHub Copilot seat per dev is cheaper than a Claude Max seat per dev, so guess which one finance approved. claudio is the bridge — it takes the Copilot subscription you already have and points Claude Code at it, giving you the agentic CLI experience without a second invoice, a second SSO integration, or another awkward conversation with your manager.
+
+Works great on that HP laptop IT handed you.
+
+---
+
+Under the hood: each developer runs a small local container that exposes a [LiteLLM](https://docs.litellm.ai/) proxy translating Anthropic's Messages API to Copilot's OpenAI-shaped backend, plus a Next.js control panel for OAuth, model selection, and shadow-cost tracking.
 
 A `claudio` PowerShell wrapper switches Claude Code over to the proxy on demand:
 
@@ -67,7 +75,6 @@ From there:
 | Open the control panel | <http://localhost:3000> |
 | Re-authenticate (e.g. switch GitHub accounts) | Control panel → **/auth → Re-authenticate** |
 | Revoke and forget tokens | Control panel → **/auth → Revoke** |
-| See shadow cost | Control panel → **/spend** |
 | Stop everything | `podman compose down` |
 
 ## Architecture
