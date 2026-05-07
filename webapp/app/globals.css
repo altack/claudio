@@ -1,0 +1,211 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ---------------------------------------------------------------------------
+   claudex — TUI minimal palette.
+   Single typeface (JetBrains Mono), hairline borders, amber accent, no
+   purple, no glass, no gradients, zero radius. Density first.
+   --------------------------------------------------------------------------- */
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-dim: var(--dim);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-accent: var(--accent);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-err: var(--err);
+
+  /* shadcn primitives still referenced by a couple of vendored components */
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--bg);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--bg);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--bg);
+  --color-secondary: var(--bg);
+  --color-secondary-foreground: var(--fg);
+  --color-muted-foreground: var(--muted);
+  --color-accent-foreground: var(--bg);
+  --color-destructive: var(--err);
+  --color-destructive-foreground: var(--bg);
+  --color-border: var(--hairline);
+  --color-input: var(--hairline);
+  --color-ring: var(--accent);
+
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+
+  --font-sans: var(--font-mono), ui-monospace, monospace;
+  --font-mono: var(--font-mono), ui-monospace, monospace;
+}
+
+:root,
+.dark {
+  --radius: 0;
+
+  --bg: #0a0a0a;
+  --fg: #d6d3ca;            /* warm off-white — easier on the eyes than pure */
+  --muted: #6f6c64;         /* tracks fg's warmth */
+  --dim: #3a3833;
+  --hairline: #1f1f1f;
+  --hairline-strong: #2c2c2c;
+
+  --accent: #fbbf24;        /* amber-400 — highlight / selected / focus */
+  --ok: #4ade80;            /* green-400 */
+  --warn: #fbbf24;
+  --err: #f87171;           /* red-400 */
+}
+
+@layer base {
+  * {
+    border-color: var(--hairline);
+  }
+  html {
+    color-scheme: dark;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-feature-settings: "ss20", "zero", "tnum";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    min-height: 100svh;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  ::selection {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  /* Hairline focus ring instead of the default thick blur */
+  :focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+  }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--hairline-strong); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+}
+
+/* Small inline status dot — used inline next to status text */
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+/* Section header — index label + title. Used for PROCESSES, USAGE, etc. */
+.section-h {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+}
+.section-h .num {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The hairline divider used between rows of information inside a section. */
+.row {
+  display: grid;
+  grid-template-columns: 16ch 6ch 1fr auto;
+  gap: 16px;
+  padding: 4px 0;
+  align-items: baseline;
+}
+
+/* Recharts bare overrides — strip its default anti-aliasing fluff */
+.recharts-cartesian-axis-tick text {
+  fill: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: var(--hairline);
+}
+.recharts-tooltip-wrapper {
+  outline: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Sonner toast — drag it kicking into the TUI aesthetic.
+   Overrides via data-sonner-* attributes because Sonner sets inline styles
+   that beat normal class-based theming.
+   --------------------------------------------------------------------------- */
+[data-sonner-toaster] {
+  --width: 360px;
+  font-family: var(--font-mono), ui-monospace, monospace !important;
+}
+[data-sonner-toast] {
+  background: #0a0a0a !important;
+  border: 1px solid var(--hairline-strong) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 12px 14px !important;
+  gap: 4px !important;
+  font-family: var(--font-mono), ui-monospace, monospace !important;
+}
+[data-sonner-toast] [data-icon] {
+  display: none !important;
+}
+[data-sonner-toast] [data-content] {
+  gap: 4px !important;
+}
+[data-sonner-toast] [data-title] {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  color: var(--fg) !important;
+  font-family: var(--font-mono), ui-monospace, monospace !important;
+  letter-spacing: 0 !important;
+}
+[data-sonner-toast] [data-description] {
+  /* Indent description so it lines up with the title text past the dot. */
+  padding-left: 14px !important;
+  font-size: 12px !important;
+  color: var(--muted) !important;
+  font-family: var(--font-mono), ui-monospace, monospace !important;
+  letter-spacing: 0 !important;
+  line-height: 1.4 !important;
+}
+/* Status-dot prefix on the title — matches the dashboard's StatusDot. */
+[data-sonner-toast] [data-title]::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  background: var(--accent);
+}
+[data-sonner-toast][data-type="success"] [data-title]::before {
+  background: var(--ok);
+}
+[data-sonner-toast][data-type="error"] [data-title]::before {
+  background: var(--err);
+}
+[data-sonner-toast][data-type="warning"] [data-title]::before {
+  background: var(--warn);
+}
