@@ -3,7 +3,7 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
-// claudex is dark-only; pin the toaster theme so we don't pull in
+// claudio is dark-only; pin the toaster theme so we don't pull in
 // `next-themes` just to avoid styling drift.
 const Toaster = ({ ...props }: ToasterProps) => {
   return (

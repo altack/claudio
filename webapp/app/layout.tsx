@@ -12,7 +12,7 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "claudex",
+  title: "claudio",
   description: "Claude Code through your GitHub Copilot subscription.",
 };
 

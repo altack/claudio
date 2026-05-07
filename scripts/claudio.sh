@@ -4,17 +4,17 @@
 # Sets the Anthropic-compatible env vars Claude Code reads, then invokes
 # `claude` with whatever arguments you pass through. Reads the LiteLLM
 # master key (which doubles as the proxy's auth token) from
-# ~/.claudex/config.json, written by setup.sh.
+# ~/.claudio/config.json, written by setup.sh.
 
 set -euo pipefail
 
-config_path=$HOME/.claudex/config.json
+config_path=$HOME/.claudio/config.json
 if [[ ! -f "$config_path" ]]; then
-  echo "claudex isn't configured yet. Run scripts/setup.sh from the claudex repo first." >&2
+  echo "claudio isn't configured yet. Run scripts/setup.sh from the claudio repo first." >&2
   exit 1
 fi
 
-# We control both files we parse here (~/.claudex/config.json and the
+# We control both files we parse here (~/.claudio/config.json and the
 # webapp's /api/preferences response), so a sed-based extractor is enough —
 # no jq dependency to install on the user's machine.
 extract_json_string() {
@@ -49,7 +49,7 @@ sonnet_default=claude-sonnet-4-6
 haiku_default=claude-haiku-4-5
 
 # Pull per-tier defaults from the webapp. The user picks them in /; the
-# webapp persists them on the claudex_app named volume. Soft-fail to the
+# webapp persists them on the claudio_app named volume. Soft-fail to the
 # hardcoded values if the webapp can't be reached so the wrapper still
 # works headless.
 prefs=$(curl -fsS --max-time 2 http://127.0.0.1:3000/api/preferences 2>/dev/null || true)

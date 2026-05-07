@@ -3,7 +3,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ---------------------------------------------------------------------------
-   claudex — TUI minimal palette.
+   claudio — TUI minimal palette.
    Single typeface (JetBrains Mono), hairline borders, amber accent, no
    purple, no glass, no gradients, zero radius. Density first.
    --------------------------------------------------------------------------- */

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-`claudex` routes Claude Code through a developer's GitHub Copilot subscription instead of the Anthropic API. One container, one image, one developer per install. See `README.md` for product framing and trade-offs (Copilot ToS gray area, translation fidelity, shadow cost, LiteLLM advisory pin).
+`claudio` routes Claude Code through a developer's GitHub Copilot subscription instead of the Anthropic API. One container, one image, one developer per install. See `README.md` for product framing and trade-offs (Copilot ToS gray area, translation fidelity, shadow cost, LiteLLM advisory pin).
 
 ## Common commands
 
@@ -13,10 +13,10 @@ Container lifecycle (PowerShell on Windows; works with `podman compose` and `doc
 ```pwsh
 ./scripts/setup.ps1            # idempotent first-time setup: build, up, install wrapper
 podman compose up -d --build   # rebuild image after Dockerfile / litellm config change
-podman compose restart claudex # pick up litellm/config.yaml edits without rebuilding
+podman compose restart claudio # pick up litellm/config.yaml edits without rebuilding
 podman compose down            # stop; add -v to also drop the named volume (deletes tokens)
-podman logs -f claudex         # combined supervisord output for both processes
-./scripts/uninstall.ps1        # remove claudex.ps1 from ~/.claude/bin and PATH
+podman logs -f claudio         # combined supervisord output for both processes
+./scripts/uninstall.ps1        # remove claudio.ps1 from ~/.claude/bin and PATH
 ```
 
 Webapp (run **outside** the container only when iterating on the Next.js code; the proxy is reached over loopback so the dev server still needs the container running for `/api/*` routes that talk to LiteLLM):
@@ -38,7 +38,7 @@ There is no test suite and no top-level lint task. Don't invent one.
 
 The image bundles **LiteLLM** (Python, `:4000`) and the **Next.js control panel** (Node, `:3000`) under `supervisord` as PID 1. `Dockerfile` is multi-stage: stage 1 runs `next build` with `output: "standalone"`; stage 2 is `python:3.12-slim` with Node 20 added so it can run `node /app/server.js`. `supervisor/supervisord.conf` defines the two `[program:*]` blocks and points the webapp at LiteLLM via `LITELLM_BASE_URL=http://127.0.0.1:4000`.
 
-Ports are bound to `127.0.0.1` deliberately in `compose.yaml`. There is exactly one named volume, `claudex_copilot` mounted at `/data/copilot`, holding GitHub OAuth state. **Don't introduce Windows-path bind mounts** — Podman-on-WSL2 path translation and rootless UID mapping make them unreliable.
+Ports are bound to `127.0.0.1` deliberately in `compose.yaml`. There is exactly one named volume, `claudio_copilot` mounted at `/data/copilot`, holding GitHub OAuth state. **Don't introduce Windows-path bind mounts** — Podman-on-WSL2 path translation and rootless UID mapping make them unreliable.
 
 ### The OAuth dance, and why it lives in the webapp
 
@@ -56,7 +56,7 @@ LiteLLM registers `github_copilot/*` deployments **at startup** against whatever
 
 Claude Code's `/model` picker only adds entries from `/v1/models` whose IDs **start with `claude` or `anthropic`**. GitHub Copilot brokers the real Claude family on higher tiers, so `litellm/config.yaml` ships **1:1 pass-throughs** (e.g. `claude-opus-4.7 → github_copilot/claude-opus-4.7`) with no Messages↔OpenAI translation.
 
-It also ships **dash-form duplicates** (`claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`) because `claudex.ps1` sets `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` to dashed IDs — without the duplicates, `/model opus|sonnet|haiku` resolves to a name the gateway doesn't serve. **Keep dotted and dashed aliases in sync** when editing `config.yaml`.
+It also ships **dash-form duplicates** (`claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`) because `claudio.ps1` sets `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` to dashed IDs — without the duplicates, `/model opus|sonnet|haiku` resolves to a name the gateway doesn't serve. **Keep dotted and dashed aliases in sync** when editing `config.yaml`.
 
 If translation ever does become necessary (e.g. routing to `gpt-*` Copilot models), `litellm_settings.drop_params: true` is what keeps OpenAI-only fields from leaking through.
 
@@ -70,13 +70,13 @@ Next.js 15 App Router. Pages: `/` (status grid + smoke test), `/auth`, `/models`
 
 ### The PowerShell wrapper
 
-`scripts/claudex.ps1` is what makes `claudex` distinct from `claude`:
+`scripts/claudio.ps1` is what makes `claudio` distinct from `claude`:
 
-1. Reads master key from `~\.claudex\config.json` (written by `install-claudex.ps1`).
+1. Reads master key from `~\.claudio\config.json` (written by `install-claudio.ps1`).
 2. Smoke-tests `http://127.0.0.1:4000/health/liveliness` so a missing container produces a clear error before Claude Code starts up.
 3. Sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, and the three `ANTHROPIC_DEFAULT_*_MODEL` vars, then `& claude @args`.
 
-If you change a default model alias, update both `claudex.ps1` (env vars) **and** `litellm/config.yaml` (alias must exist).
+If you change a default model alias, update both `claudio.ps1` (env vars) **and** `litellm/config.yaml` (alias must exist).
 
 ## Editing rules
 

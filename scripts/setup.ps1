@@ -1,13 +1,13 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    One-shot setup for claudex on Windows.
+    One-shot setup for claudio on Windows.
 
 .DESCRIPTION
     1. Detects podman (preferred) or docker.
     2. Verifies .env exists and has LITELLM_MASTER_KEY set.
     3. Builds and starts the container.
-    4. Installs the claudex wrapper into ~\.claude\bin and adds it to PATH.
+    4. Installs the claudio wrapper into ~\.claude\bin and adds it to PATH.
     5. Opens the control panel in your default browser.
 
     Re-running is safe; everything is idempotent.
@@ -66,7 +66,7 @@ function New-MasterKey {
     # length you get after stripping +/= from base64 output.
     $bytes = New-Object byte[] 24
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-    return 'sk-claudex-' + ([System.BitConverter]::ToString($bytes) -replace '-','').ToLower()
+    return 'sk-claudio-' + ([System.BitConverter]::ToString($bytes) -replace '-','').ToLower()
 }
 
 # --- 2. .env ------------------------------------------------------------------
@@ -77,7 +77,7 @@ if (-not (Test-Path -LiteralPath $envFile)) {
     Write-Host "      created .env from .env.example" -ForegroundColor DarkGray
 }
 $envVars = Read-DotEnv -Path $envFile
-if (-not $envVars['LITELLM_MASTER_KEY'] -or $envVars['LITELLM_MASTER_KEY'] -eq 'sk-claudex-change-me') {
+if (-not $envVars['LITELLM_MASTER_KEY'] -or $envVars['LITELLM_MASTER_KEY'] -eq 'sk-claudio-change-me') {
     $randomKey = New-MasterKey
     if (Select-String -LiteralPath $envFile -Pattern '^LITELLM_MASTER_KEY=' -Quiet) {
         (Get-Content -LiteralPath $envFile) `
@@ -101,17 +101,17 @@ Write-Host "[4/5] Starting container..." -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { throw "compose up failed." }
 
 # --- 4. Wrapper ---------------------------------------------------------------
-Write-Host "[5/5] Installing claudex wrapper..." -ForegroundColor Cyan
-& (Join-Path $PSScriptRoot 'install-claudex.ps1') -MasterKey $masterKey
+Write-Host "[5/5] Installing claudio wrapper..." -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot 'install-claudio.ps1') -MasterKey $masterKey
 
 # --- 5. Hand-off --------------------------------------------------------------
 Write-Host ""
-Write-Host "claudex is up." -ForegroundColor Green
+Write-Host "claudio is up." -ForegroundColor Green
 Write-Host "  Control panel: http://localhost:3000"
 Write-Host "  Proxy:         http://127.0.0.1:4000"
 Write-Host ""
 Write-Host "Next: open the control panel and click 'Sign in with GitHub' on /auth."
-Write-Host "      Then run 'claudex' from a fresh terminal."
+Write-Host "      Then run 'claudio' from a fresh terminal."
 
 if (-not $SkipBrowser) {
     Start-Process 'http://localhost:3000'

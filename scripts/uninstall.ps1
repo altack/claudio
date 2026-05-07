@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Remove the claudex wrapper. Does NOT touch the running container or volumes.
+    Remove the claudio wrapper. Does NOT touch the running container or volumes.
 
 .DESCRIPTION
     Run `podman compose down -v` separately if you also want to stop the
@@ -14,9 +14,9 @@ param()
 $ErrorActionPreference = 'Stop'
 
 $binDir  = Join-Path $env:USERPROFILE '.claude\bin'
-$cfgDir  = Join-Path $env:USERPROFILE '.claudex'
+$cfgDir  = Join-Path $env:USERPROFILE '.claudio'
 
-foreach ($name in @('claudex.ps1','claudex.cmd')) {
+foreach ($name in @('claudio.ps1','claudio.cmd')) {
     $p = Join-Path $binDir $name
     if (Test-Path -LiteralPath $p) {
         Remove-Item -LiteralPath $p -Force

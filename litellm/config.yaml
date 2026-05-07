@@ -12,7 +12,7 @@ model_list:
   # through them directly - no Messages<->OpenAI Chat translation needed.
 
   # ---- 1:1 pass-throughs for Copilot's Claude IDs ------------------------
-  # Use these directly: `claudex --model claude-opus-4.7`
+  # Use these directly: `claudio --model claude-opus-4.7`
   - model_name: claude-opus-4.7
     litellm_params:
       model: github_copilot/claude-opus-4.7
@@ -33,7 +33,7 @@ model_list:
       model: github_copilot/claude-haiku-4.5
 
   # ---- Dash-form aliases ------------------------------------------------
-  # Claude Code's ANTHROPIC_DEFAULT_*_MODEL env vars (set by claudex.ps1)
+  # Claude Code's ANTHROPIC_DEFAULT_*_MODEL env vars (set by claudio.ps1)
   # use dashes, not dots. These let `/model opus|sonnet|haiku` resolve
   # cleanly to the right Copilot Claude.
   - model_name: claude-opus-4-7

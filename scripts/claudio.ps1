@@ -7,18 +7,18 @@
     Sets the Anthropic-compatible env vars Claude Code reads, then invokes
     `claude` with whatever arguments you pass through. Reads the LiteLLM
     master key (which doubles as the proxy's auth token) from
-    %USERPROFILE%\.claudex\config.json, written by setup.ps1.
+    %USERPROFILE%\.claudio\config.json, written by setup.ps1.
 
 .EXAMPLE
-    claudex
-    claudex --print "what does this repo do"
+    claudio
+    claudio --print "what does this repo do"
 #>
 
 $ErrorActionPreference = 'Stop'
 
-$configPath = Join-Path $env:USERPROFILE '.claudex\config.json'
+$configPath = Join-Path $env:USERPROFILE '.claudio\config.json'
 if (-not (Test-Path -LiteralPath $configPath)) {
-    Write-Error "claudex isn't configured yet. Run scripts/setup.ps1 from the claudex repo first."
+    Write-Error "claudio isn't configured yet. Run scripts/setup.ps1 from the claudio repo first."
     exit 1
 }
 
@@ -52,7 +52,7 @@ $sonnetDefault = 'claude-sonnet-4-6'
 $haikuDefault  = 'claude-haiku-4-5'
 
 # Pull per-tier defaults from the webapp. The user picks them in /; the
-# webapp persists them on the claudex_app named volume. Soft-fail to the
+# webapp persists them on the claudio_app named volume. Soft-fail to the
 # hardcoded values if the webapp can't be reached so the wrapper still
 # works headless (boot-time, network blip, podman not started yet).
 try {

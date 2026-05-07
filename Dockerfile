@@ -63,7 +63,7 @@ COPY supervisor/supervisord.conf /etc/supervisor/supervisord.conf
 ENV PYTHONPATH=/etc/litellm
 
 # Data dirs (persisted via named volumes in compose.yaml).
-RUN mkdir -p /data/copilot /data/litellm /data/claudex
+RUN mkdir -p /data/copilot /data/litellm /data/claudio
 
 EXPOSE 3000 4000
 

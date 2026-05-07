@@ -60,7 +60,7 @@ export default function OnboardingFlow() {
 
   const openGitHubPopup = useCallback((code: DeviceCode) => {
     // Try popup first; fall back to a new tab if the browser blocks it.
-    const popup = window.open(code.verification_uri, "claudex-github-auth", POPUP_FEATURES);
+    const popup = window.open(code.verification_uri, "claudio-github-auth", POPUP_FEATURES);
     if (popup) {
       popupRef.current = popup;
       popup.focus?.();
@@ -142,7 +142,7 @@ export default function OnboardingFlow() {
     <main className="mx-auto flex min-h-screen w-full max-w-[640px] flex-col px-6 py-10">
       <header className="mb-12 flex items-baseline justify-between border-b border-hairline pb-4">
         <div className="flex items-baseline gap-3">
-          <span className="text-fg">claudex</span>
+          <span className="text-fg">claudio</span>
           <span className="text-muted">/</span>
           <span className="text-muted">authorize</span>
         </div>
@@ -180,7 +180,7 @@ export default function OnboardingFlow() {
 
       <footer className="mt-12 border-t border-hairline pt-4 text-[12px] text-muted">
         tokens stored in the local{" "}
-        <span className="text-fg">claudex_copilot</span> volume — nothing leaves
+        <span className="text-fg">claudio_copilot</span> volume — nothing leaves
         this machine
       </footer>
     </main>
@@ -225,7 +225,7 @@ function IntroState({
         </li>
         <li>
           <span className="text-ok">●</span>{" "}
-          <span className="text-fg">no claudex account</span> — your github
+          <span className="text-fg">no claudio account</span> — your github
           identity is the only gate
         </li>
       </ul>

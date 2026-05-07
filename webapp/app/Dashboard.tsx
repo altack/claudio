@@ -106,8 +106,8 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
     [state.preferences],
   );
 
-  const openInClaudex = useCallback(async (alias: string) => {
-    const cmd = `claudex --model ${alias}`;
+  const openInClaudio = useCallback(async (alias: string) => {
+    const cmd = `claudio --model ${alias}`;
     try {
       await navigator.clipboard.writeText(cmd);
       toast.success("copied — paste in your terminal");
@@ -199,7 +199,7 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
     <main className="mx-auto w-full max-w-[920px] px-6 py-10 min-h-screen flex flex-col">
       <header className="mb-12 flex items-baseline justify-between border-b border-hairline pb-4">
         <div className="flex items-baseline gap-4">
-          <span className="text-fg">claudex</span>
+          <span className="text-fg">claudio</span>
           <span className="flex items-baseline gap-2 text-muted">
             <StatusDot tone={overallTone} />
             <span
@@ -288,7 +288,7 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
               pending={pendingTier === "opus"}
               onSelect={(alias) => setDefault("opus", alias)}
               onChat={(alias) => setChatModel(alias)}
-              onOpenInClaudex={openInClaudex}
+              onOpenInClaudio={openInClaudio}
             />
             <TierGroup
               tier="sonnet"
@@ -297,7 +297,7 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
               pending={pendingTier === "sonnet"}
               onSelect={(alias) => setDefault("sonnet", alias)}
               onChat={(alias) => setChatModel(alias)}
-              onOpenInClaudex={openInClaudex}
+              onOpenInClaudio={openInClaudio}
             />
             <TierGroup
               tier="haiku"
@@ -306,13 +306,13 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
               pending={pendingTier === "haiku"}
               onSelect={(alias) => setDefault("haiku", alias)}
               onChat={(alias) => setChatModel(alias)}
-              onOpenInClaudex={openInClaudex}
+              onOpenInClaudio={openInClaudio}
             />
             {modelsByTier.other.length > 0 && (
               <FallbackList
                 aliases={modelsByTier.other.map((m) => m.alias)}
                 onChat={(alias) => setChatModel(alias)}
-                onOpenInClaudex={openInClaudex}
+                onOpenInClaudio={openInClaudio}
               />
             )}
           </div>
@@ -329,7 +329,7 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
         {state.usage.recent.length === 0 ? (
           <div className="text-muted">
             no calls recorded yet — run{" "}
-            <span className="text-fg">claudex --print &quot;say ok&quot;</span>{" "}
+            <span className="text-fg">claudio --print &quot;say ok&quot;</span>{" "}
             to generate activity
           </div>
         ) : (
@@ -381,7 +381,7 @@ function Section({
   useEffect(() => {
     if (!collapsible || !storageKey || typeof window === "undefined") return;
     try {
-      const v = window.localStorage.getItem(`claudex.section.${storageKey}`);
+      const v = window.localStorage.getItem(`claudio.section.${storageKey}`);
       if (v !== null) setIsOpen(v === "1");
     } catch {
       // localStorage can throw in private modes; just use the default.
@@ -394,7 +394,7 @@ function Section({
       if (collapsible && storageKey && typeof window !== "undefined") {
         try {
           window.localStorage.setItem(
-            `claudex.section.${storageKey}`,
+            `claudio.section.${storageKey}`,
             next ? "1" : "0",
           );
         } catch {
@@ -628,7 +628,7 @@ function TierGroup({
   pending,
   onSelect,
   onChat,
-  onOpenInClaudex,
+  onOpenInClaudio,
 }: {
   tier: Tier;
   entries: ModelMapping[];
@@ -636,7 +636,7 @@ function TierGroup({
   pending: boolean;
   onSelect: (alias: string) => void;
   onChat: (alias: string) => void;
-  onOpenInClaudex: (alias: string) => void;
+  onOpenInClaudio: (alias: string) => void;
 }) {
   if (entries.length === 0) return null;
   return (
@@ -658,7 +658,7 @@ function TierGroup({
             disabled={pending}
             onSelect={() => onSelect(m.alias)}
             onChat={() => onChat(m.alias)}
-            onOpenInClaudex={() => onOpenInClaudex(m.alias)}
+            onOpenInClaudio={() => onOpenInClaudio(m.alias)}
           />
         ))}
       </div>
@@ -672,7 +672,7 @@ function ModelRow({
   disabled,
   onSelect,
   onChat,
-  onOpenInClaudex,
+  onOpenInClaudio,
   showCheck = true,
 }: {
   alias: string;
@@ -680,7 +680,7 @@ function ModelRow({
   disabled?: boolean;
   onSelect?: () => void;
   onChat: () => void;
-  onOpenInClaudex: () => void;
+  onOpenInClaudio: () => void;
   showCheck?: boolean;
 }) {
   return (
@@ -726,11 +726,11 @@ function ModelRow({
       </button>
       <button
         type="button"
-        onClick={onOpenInClaudex}
+        onClick={onOpenInClaudio}
         className="shrink-0 px-2 py-[2px] text-[11px] text-muted opacity-0 group-hover:opacity-100 hover:text-accent focus:opacity-100 focus:text-accent transition-opacity"
-        title={`copy: claudex --model ${alias}`}
+        title={`copy: claudio --model ${alias}`}
       >
-        ↗ claudex
+        ↗ claudio
       </button>
     </div>
   );
@@ -912,11 +912,11 @@ function HeatmapCell({
 function FallbackList({
   aliases,
   onChat,
-  onOpenInClaudex,
+  onOpenInClaudio,
 }: {
   aliases: string[];
   onChat: (alias: string) => void;
-  onOpenInClaudex: (alias: string) => void;
+  onOpenInClaudio: (alias: string) => void;
 }) {
   return (
     <div className="pt-3 border-t border-hairline">
@@ -930,14 +930,14 @@ function FallbackList({
             alias={alias}
             isActive={false}
             onChat={() => onChat(alias)}
-            onOpenInClaudex={() => onOpenInClaudex(alias)}
+            onOpenInClaudio={() => onOpenInClaudio(alias)}
             showCheck={true}
           />
         ))}
       </div>
       <div className="mt-2 text-[12px] text-dim">
         invoke with{" "}
-        <span className="text-muted">claudex --model &lt;alias&gt;</span>
+        <span className="text-muted">claudio --model &lt;alias&gt;</span>
         {" "}or{" "}
         <span className="text-muted">/model &lt;alias&gt;</span>
         {" "}inside Claude Code — these don&apos;t override the tier defaults.

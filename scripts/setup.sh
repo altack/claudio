@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# One-shot setup for claudex on Linux / WSL.
+# One-shot setup for claudio on Linux / WSL.
 #
 # 1. Detects podman (preferred) or docker.
 # 2. Verifies .env exists and has LITELLM_MASTER_KEY set.
 # 3. Builds and starts the container.
-# 4. Installs the claudex wrapper into ~/.local/bin and adds it to PATH.
+# 4. Installs the claudio wrapper into ~/.local/bin and adds it to PATH.
 # 5. Opens the control panel in your default browser.
 #
 # Re-running is safe; everything is idempotent.
@@ -73,16 +73,16 @@ read_master_key() {
 
 mint_master_key() {
   if command -v openssl >/dev/null 2>&1; then
-    printf 'sk-claudex-%s' "$(openssl rand -hex 24)"
+    printf 'sk-claudio-%s' "$(openssl rand -hex 24)"
   elif command -v xxd >/dev/null 2>&1; then
-    printf 'sk-claudex-%s' "$(head -c 24 /dev/urandom | xxd -p -c 256)"
+    printf 'sk-claudio-%s' "$(head -c 24 /dev/urandom | xxd -p -c 256)"
   else
-    printf 'sk-claudex-%s' "$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')"
+    printf 'sk-claudio-%s' "$(od -An -tx1 -N24 /dev/urandom | tr -d ' \n')"
   fi
 }
 
 master_key=$(read_master_key)
-if [[ -z "$master_key" || "$master_key" == "sk-claudex-change-me" ]]; then
+if [[ -z "$master_key" || "$master_key" == "sk-claudio-change-me" ]]; then
   master_key=$(mint_master_key)
   if grep -qE '^LITELLM_MASTER_KEY=' "$env_file"; then
     tmp=$(mktemp)
@@ -105,17 +105,17 @@ echo "[4/5] Starting container..."
 $compose up -d
 
 # --- 4. Wrapper -------------------------------------------------------------
-echo "[5/5] Installing claudex wrapper..."
-"$repo_root/scripts/install-claudex.sh" "$master_key"
+echo "[5/5] Installing claudio wrapper..."
+"$repo_root/scripts/install-claudio.sh" "$master_key"
 
 # --- 5. Hand-off ------------------------------------------------------------
 echo
-echo "claudex is up."
+echo "claudio is up."
 echo "  Control panel: http://localhost:3000"
 echo "  Proxy:         http://127.0.0.1:4000"
 echo
 echo "Next: open the control panel and click 'Sign in with GitHub' on /auth."
-echo "      Then run 'claudex' from a fresh terminal."
+echo "      Then run 'claudio' from a fresh terminal."
 
 if [[ "$skip_browser" -eq 0 ]]; then
   if command -v xdg-open >/dev/null 2>&1; then

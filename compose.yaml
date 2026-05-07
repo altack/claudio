@@ -2,12 +2,12 @@
 # Single-image, single-container design. Each developer runs their own copy
 # locally; nothing here is meant to be shared on a network.
 services:
-  claudex:
+  claudio:
     build:
       context: .
       dockerfile: Dockerfile
-    image: claudex:local
-    container_name: claudex
+    image: claudio:local
+    container_name: claudio
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"   # control webapp (bind to loopback only)
@@ -29,15 +29,15 @@ services:
     volumes:
       # Named volumes only - bind mounts on Podman+Windows are unreliable
       # because of WSL2 path translation and rootless permission mapping.
-      - claudex_copilot:/data/copilot
+      - claudio_copilot:/data/copilot
       # Spend log JSONL written by litellm/spend_logger.py and read by
       # the webapp's /spend page. Survives `compose down`; `down -v` drops it.
-      - claudex_litellm:/data/litellm
+      - claudio_litellm:/data/litellm
       # User preferences (default model per tier) edited from the webapp
-      # and read by scripts/claudex.ps1 over HTTP on each invocation.
-      - claudex_app:/data/claudex
+      # and read by scripts/claudio.ps1 over HTTP on each invocation.
+      - claudio_app:/data/claudio
 
 volumes:
-  claudex_copilot:
-  claudex_litellm:
-  claudex_app:
+  claudio_copilot:
+  claudio_litellm:
+  claudio_app:

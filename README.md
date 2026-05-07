@@ -1,12 +1,12 @@
-# claudex
+# claudio
 
 Run Claude Code (the harness) against your **GitHub Copilot subscription** instead of the Anthropic API. Each developer runs a small local container that exposes a [LiteLLM](https://docs.litellm.ai/) proxy translating Anthropic's Messages API to Copilot's OpenAI-shaped backend, plus a Next.js control panel for OAuth, model selection, and shadow-cost tracking.
 
-A `claudex` PowerShell wrapper switches Claude Code over to the proxy on demand:
+A `claudio` PowerShell wrapper switches Claude Code over to the proxy on demand:
 
 ```pwsh
 claude       # talks to Anthropic as usual
-claudex      # talks to GitHub Copilot via the local LiteLLM proxy
+claudio      # talks to GitHub Copilot via the local LiteLLM proxy
 ```
 
 ## What's in here
@@ -18,7 +18,7 @@ claudex      # talks to GitHub Copilot via the local LiteLLM proxy
 ├── litellm/config.yaml     # claude-* alias map -> github_copilot/*
 ├── supervisor/             # supervisord config
 ├── webapp/                 # Next.js control panel
-└── scripts/                # setup.{ps1,sh}, claudex.{ps1,sh}, install/uninstall
+└── scripts/                # setup.{ps1,sh}, claudio.{ps1,sh}, install/uninstall
 ```
 
 ## Prerequisites
@@ -48,7 +48,7 @@ The setup script will:
 1. Detect `podman` (preferred) or `docker`.
 2. Mint a random `LITELLM_MASTER_KEY` in `.env` if missing.
 3. Build the image and start the container.
-4. Install the `claudex` wrapper and put it on your `PATH`
+4. Install the `claudio` wrapper and put it on your `PATH`
    (`~/.claude/bin` on Windows, `~/.local/bin` on Linux/WSL).
 5. Open the control panel at <http://localhost:3000>.
 
@@ -56,13 +56,13 @@ From there:
 
 - Click **Sign in with GitHub** to run the OAuth device flow.
 - The control panel polls until your Copilot tokens are minted.
-- Run `claudex` in a fresh terminal.
+- Run `claudio` in a fresh terminal.
 
 ## Daily usage
 
 | Need | Command |
 |---|---|
-| Use Claude Code via Copilot | `claudex` |
+| Use Claude Code via Copilot | `claudio` |
 | Use Claude Code as usual | `claude` |
 | Open the control panel | <http://localhost:3000> |
 | Re-authenticate (e.g. switch GitHub accounts) | Control panel → **/auth → Re-authenticate** |
@@ -75,13 +75,13 @@ From there:
 ```
 ┌─────────────────────────────────────────────┐
 │  PowerShell                                 │
-│  claudex  ──► claude (ANTHROPIC_BASE_URL=   │
+│  claudio  ──► claude (ANTHROPIC_BASE_URL=   │
 │                       http://localhost:4000)│
 └─────────────────────────────────────────────┘
                        │
                        ▼   /v1/messages (Anthropic format)
 ┌─────────────────────────────────────────────┐
-│  Container: claudex                         │
+│  Container: claudio                         │
 │                                             │
 │  :4000  LiteLLM ──► GitHub Copilot API     │
 │         translates Messages ↔ OpenAI Chat   │
@@ -110,7 +110,7 @@ Claude Code's `/v1/models` discovery only adds models whose IDs start with `clau
     model: github_copilot/gpt-4
 ```
 
-Edit `litellm/config.yaml` and `podman compose restart claudex` to change the mapping. (UI-driven editing is on the v2 list.)
+Edit `litellm/config.yaml` and `podman compose restart claudio` to change the mapping. (UI-driven editing is on the v2 list.)
 
 ## Trade-offs to know about
 
@@ -123,7 +123,7 @@ Edit `litellm/config.yaml` and `podman compose restart claudex` to change the ma
 
 - **`Error: short-name resolution enforced`** — you're on rootful Podman with strict short-name policy. Run `podman compose build` first, or set `short-name-mode = "permissive"` in your registries config.
 - **Container starts but `:3000` / `:4000` aren't reachable.** Check Podman Machine port forwarding: `podman machine inspect | rg PortForwarding`. The compose file binds to `127.0.0.1` deliberately — confirm nothing else is on those ports.
-- **OAuth device flow appears to hang.** The control panel polls every 5s; LiteLLM's authenticator polls GitHub's token endpoint at the interval GitHub returns. Give it ~30s before assuming something's wrong, then check `podman logs claudex`.
+- **OAuth device flow appears to hang.** The control panel polls every 5s; LiteLLM's authenticator polls GitHub's token endpoint at the interval GitHub returns. Give it ~30s before assuming something's wrong, then check `podman logs claudio`.
 - **`podman compose` not found.** Install `podman-compose` (`pip install podman-compose`) or use Podman Desktop's bundled compose provider.
 
 ## Tear down

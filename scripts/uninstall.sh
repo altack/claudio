@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Remove the claudex wrapper. Does NOT touch the running container or volumes.
+# Remove the claudio wrapper. Does NOT touch the running container or volumes.
 #
 # Run `podman compose down -v` separately if you also want to stop the
 # container and delete OAuth tokens / spend history.
@@ -7,11 +7,11 @@
 set -euo pipefail
 
 bin_dir=$HOME/.local/bin
-cfg_dir=$HOME/.claudex
+cfg_dir=$HOME/.claudio
 
-if [[ -f "$bin_dir/claudex" ]]; then
-  rm -f "$bin_dir/claudex"
-  echo "removed $bin_dir/claudex"
+if [[ -f "$bin_dir/claudio" ]]; then
+  rm -f "$bin_dir/claudio"
+  echo "removed $bin_dir/claudio"
 fi
 
 # Drop the master key file too. Tokens themselves live in the container volume.
@@ -24,13 +24,13 @@ fi
 strip_block() {
   local rc=$1
   [[ -f "$rc" ]] || return 0
-  if ! grep -qF '>>> claudex PATH >>>' "$rc"; then
+  if ! grep -qF '>>> claudio PATH >>>' "$rc"; then
     return 0
   fi
   tmp=$(mktemp)
   awk '
-    /# >>> claudex PATH >>>/ { skip=1; next }
-    /# <<< claudex PATH <<</ { skip=0; next }
+    /# >>> claudio PATH >>>/ { skip=1; next }
+    /# <<< claudio PATH <<</ { skip=0; next }
     !skip
   ' "$rc" > "$tmp"
   mv "$tmp" "$rc"

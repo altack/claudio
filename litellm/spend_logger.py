@@ -22,7 +22,7 @@ from litellm.integrations.custom_logger import CustomLogger
 # every completion response and are how we surface "premium quota left".
 litellm.return_response_headers = True
 
-SPEND_LOG_PATH = Path(os.environ.get("CLAUDEX_SPEND_LOG", "/data/litellm/spend.jsonl"))
+SPEND_LOG_PATH = Path(os.environ.get("CLAUDIO_SPEND_LOG", "/data/litellm/spend.jsonl"))
 
 # Append is atomic on POSIX for writes <= PIPE_BUF (4096 bytes); our records
 # are well under that. The lock guards against torn writes when LiteLLM fans

@@ -4,7 +4,7 @@
 
 import { readFile } from "node:fs/promises";
 
-const SPEND_LOG_PATH = process.env.CLAUDEX_SPEND_LOG ?? "/data/litellm/spend.jsonl";
+const SPEND_LOG_PATH = process.env.CLAUDIO_SPEND_LOG ?? "/data/litellm/spend.jsonl";
 
 export type RawCall = {
   ts: string;

@@ -172,7 +172,7 @@ export async function pollDeviceFlow(): Promise<PollResult> {
 
   const body = (await res.json()) as GitHubTokenResponse;
 
-  // Goes to stderr -> visible in `podman logs claudex` so we can see exactly
+  // Goes to stderr -> visible in `podman logs claudio` so we can see exactly
   // what GitHub said when something's misbehaving.
   console.error("[poll]", JSON.stringify(body));
 

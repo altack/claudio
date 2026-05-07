@@ -1,8 +1,8 @@
 // User preferences persisted across container restarts. Lives on the
-// claudex_app named volume (/data/claudex/preferences.json) so it survives
+// claudio_app named volume (/data/claudio/preferences.json) so it survives
 // `compose down` but not `down -v`.
 //
-// The wrapper script (scripts/claudex.ps1) reads these over HTTP from
+// The wrapper script (scripts/claudio.ps1) reads these over HTTP from
 // /api/preferences and exports them as ANTHROPIC_DEFAULT_*_MODEL env vars.
 
 import { promises as fs } from "node:fs";
@@ -23,7 +23,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
 };
 
 const PREFERENCES_DIR =
-  process.env.CLAUDEX_APP_DIR || "/data/claudex";
+  process.env.CLAUDIO_APP_DIR || "/data/claudio";
 
 const PREFERENCES_FILE = path.join(PREFERENCES_DIR, "preferences.json");
 
