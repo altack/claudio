@@ -42,9 +42,6 @@ Open the control panel: http://localhost:3000
     exit 1
 }
 
-$env:ANTHROPIC_BASE_URL  = 'http://127.0.0.1:4000'
-$env:ANTHROPIC_AUTH_TOKEN = $config.master_key
-
 # Defaults used when the webapp is unreachable or hasn't been told otherwise.
 # These match the hardcoded values from before /api/preferences existed.
 $opusDefault   = 'claude-opus-4-7'
@@ -65,13 +62,46 @@ try {
     # silent fallback; not worth a warning for a transient network issue
 }
 
-# Pin alias resolution to the IDs the gateway actually serves. Without this
-# `/model sonnet` could resolve to an ID the gateway doesn't recognise.
-$env:ANTHROPIC_DEFAULT_OPUS_MODEL   = $opusDefault
-$env:ANTHROPIC_DEFAULT_SONNET_MODEL = $sonnetDefault
-$env:ANTHROPIC_DEFAULT_HAIKU_MODEL  = $haikuDefault
+# PowerShell scoping rule: $env:VAR writes go to the actual process
+# environment block, ignoring script scope. If this script runs in-process
+# (which it does when `claudio` resolves to claudio.ps1 rather than
+# claudio.cmd), assignments below would leak into the caller's shell — a
+# later plain `claude` in the same session would silently route through
+# our proxy and burn the user's Copilot quota. Snapshot first, restore in
+# a `finally` so the script is invocation-safe regardless of how PATH
+# resolution lands.
+$envNames = @(
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL'
+)
+$envSnapshot = @{}
+foreach ($name in $envNames) {
+    $envSnapshot[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
 
-# claude is in PATH already (Claude Code installs itself globally). Pass
-# through every argument verbatim so flags like --print or --model work.
-& claude @args
-exit $LASTEXITCODE
+$exitCode = 0
+try {
+    $env:ANTHROPIC_BASE_URL  = 'http://127.0.0.1:4000'
+    $env:ANTHROPIC_AUTH_TOKEN = $config.master_key
+    # Pin alias resolution to the IDs the gateway actually serves. Without this
+    # `/model sonnet` could resolve to an ID the gateway doesn't recognise.
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL   = $opusDefault
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = $sonnetDefault
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL  = $haikuDefault
+
+    # claude is in PATH already (Claude Code installs itself globally). Pass
+    # through every argument verbatim so flags like --print or --model work.
+    & claude @args
+    $exitCode = $LASTEXITCODE
+} finally {
+    # Runs on normal exit, exception, and Ctrl+C. SetEnvironmentVariable with
+    # a $null value removes the variable cleanly (unlike `$env:X = $null`,
+    # which leaves an empty-string entry behind).
+    foreach ($name in $envNames) {
+        [Environment]::SetEnvironmentVariable($name, $envSnapshot[$name], 'Process')
+    }
+}
+exit $exitCode
