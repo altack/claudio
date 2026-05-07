@@ -45,18 +45,26 @@ export default function ChatPanel({
   const [entries, setEntries] = useState<Entry[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  // Track the model the current state belongs to. When the parent swaps in
+  // a new model we reset state during render rather than in an effect — this
+  // is the React-recommended pattern for "reset state when a prop changes"
+  // and avoids the setState-in-effect cascade.
+  const [activeModel, setActiveModel] = useState<string | null>(model);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Reset state when the panel opens against a new model.
-  useEffect(() => {
+  if (activeModel !== model) {
+    setActiveModel(model);
     setEntries([]);
     setInput("");
     setSending(false);
-    if (model) {
-      const id = window.setTimeout(() => inputRef.current?.focus(), 80);
-      return () => window.clearTimeout(id);
-    }
+  }
+
+  // Focus the textarea shortly after the panel opens.
+  useEffect(() => {
+    if (!model) return;
+    const id = window.setTimeout(() => inputRef.current?.focus(), 80);
+    return () => window.clearTimeout(id);
   }, [model]);
 
   // Stick to bottom on new messages.

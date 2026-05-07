@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { ModelMapping, HealthResult } from "@/lib/litellm";
@@ -32,6 +39,20 @@ const POLL_MS = 5_000;
 
 type Range = "24h" | "7d" | "30d";
 
+// Drives the relative-time labels ("refresh in N"). useSyncExternalStore
+// reads `Date.now()` after hydration without a setState-in-effect cascade,
+// and returns 0 on the server so SSR/first-render HTML matches.
+function subscribeNowSec(callback: () => void): () => void {
+  const id = setInterval(callback, 30_000);
+  return () => clearInterval(id);
+}
+function nowSecSnapshot(): number {
+  return Math.floor(Date.now() / 1000);
+}
+function nowSecServerSnapshot(): number {
+  return 0;
+}
+
 export default function Dashboard({ initial }: { initial: DashboardState }) {
   const router = useRouter();
   const [state, setState] = useState<DashboardState>(initial);
@@ -39,21 +60,14 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
   const [pendingTier, setPendingTier] = useState<Tier | null>(null);
   const [range, setRange] = useState<Range>("7d");
   const [chatModel, setChatModel] = useState<string | null>(null);
-  // Initialised to 0 (not Date.now()) so SSR and the first client render
-  // produce the same HTML — otherwise hydration mismatches (React #418).
-  // The real value is set in useEffect, after hydration.
-  const [nowSec, setNowSec] = useState(0);
+  // Server snapshot returns 0 so SSR and first-render HTML match; the real
+  // value flips in post-hydration via useSyncExternalStore.
+  const nowSec = useSyncExternalStore(
+    subscribeNowSec,
+    nowSecSnapshot,
+    nowSecServerSnapshot,
+  );
   const cancelledRef = useRef(false);
-
-  // Tick every 30s — only used to update relative time labels (refresh in N).
-  useEffect(() => {
-    setNowSec(Math.floor(Date.now() / 1000));
-    const id = setInterval(
-      () => setNowSec(Math.floor(Date.now() / 1000)),
-      30_000,
-    );
-    return () => clearInterval(id);
-  }, []);
 
   // Background poll — keep the dashboard fresh without flicker.
   useEffect(() => {
@@ -391,33 +405,60 @@ function Section({
   storageKey?: string;
   defaultOpen?: boolean;
 }) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
+  // localStorage is the source of truth for collapsed state. Reading via
+  // useSyncExternalStore avoids setState-in-effect: SSR/first render returns
+  // `defaultOpen`, then post-hydration it re-snapshots from localStorage.
+  const fullKey =
+    collapsible && storageKey ? `claudio.section.${storageKey}` : null;
 
-  useEffect(() => {
-    if (!collapsible || !storageKey || typeof window === "undefined") return;
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (!fullKey || typeof window === "undefined") return () => {};
+      const eventName = `claudio:section:${fullKey}`;
+      const onStorage = (e: StorageEvent) => {
+        if (e.key === fullKey) onChange();
+      };
+      window.addEventListener("storage", onStorage);
+      window.addEventListener(eventName, onChange);
+      return () => {
+        window.removeEventListener("storage", onStorage);
+        window.removeEventListener(eventName, onChange);
+      };
+    },
+    [fullKey],
+  );
+
+  const getSnapshot = useCallback(() => {
+    if (!fullKey || typeof window === "undefined") return defaultOpen;
     try {
-      const v = window.localStorage.getItem(`claudio.section.${storageKey}`);
-      if (v !== null) setIsOpen(v === "1");
+      const v = window.localStorage.getItem(fullKey);
+      if (v !== null) return v === "1";
     } catch {
-      // localStorage can throw in private modes; just use the default.
+      // localStorage can throw in private modes; fall through to default.
     }
-  }, [collapsible, storageKey]);
+    return defaultOpen;
+  }, [fullKey, defaultOpen]);
+
+  const getServerSnapshot = useCallback(() => defaultOpen, [defaultOpen]);
+
+  const isOpen = useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    getServerSnapshot,
+  );
 
   function toggle() {
-    setIsOpen((prev) => {
-      const next = !prev;
-      if (collapsible && storageKey && typeof window !== "undefined") {
-        try {
-          window.localStorage.setItem(
-            `claudio.section.${storageKey}`,
-            next ? "1" : "0",
-          );
-        } catch {
-          // ignore — state still updates in memory
-        }
-      }
-      return next;
-    });
+    if (!fullKey || typeof window === "undefined") return;
+    const next = !isOpen;
+    try {
+      window.localStorage.setItem(fullKey, next ? "1" : "0");
+    } catch {
+      // ignore — the dispatched event below still fires, but the snapshot
+      // will keep returning the previous value, leaving state unchanged.
+    }
+    // Native "storage" events only fire across tabs; dispatch a same-tab
+    // event so our own subscriber re-reads the snapshot.
+    window.dispatchEvent(new Event(`claudio:section:${fullKey}`));
   }
 
   const titleBlock = (
@@ -544,17 +585,6 @@ function ProcessRow({
       </span>
       <span className="text-muted truncate min-w-0 flex-1">{address}</span>
       <span className="shrink-0 text-muted tabular-nums">{metric}</span>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="whitespace-nowrap">
-      <div className="text-[11px] tracking-[0.14em] text-muted uppercase">
-        {label}
-      </div>
-      <div className="mt-1 text-fg tabular-nums text-[16px]">{value}</div>
     </div>
   );
 }
@@ -1021,11 +1051,6 @@ function formatDuration(s: number): string {
   if (h < 24) return `${h}h ${m % 60}m`;
   const d = Math.floor(h / 24);
   return `${d}d ${h % 24}h`;
-}
-
-function formatLatency(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function formatRelative(ts: string, nowSec: number): string {
