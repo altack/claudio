@@ -17,6 +17,9 @@ claude       # talks to Anthropic as usual
 claudio      # talks to GitHub Copilot via the local LiteLLM proxy
 ```
 
+<img width="1012" height="1617" alt="image" src="https://github.com/user-attachments/assets/f455c8e8-2cf0-42fe-88da-76424449e88b" />  
+
+
 ## What's in here
 
 ```
