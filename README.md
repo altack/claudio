@@ -17,9 +17,6 @@ claude       # talks to Anthropic as usual
 claudio      # talks to GitHub Copilot via the local LiteLLM proxy
 ```
 
-<img width="1012" height="1617" alt="image" src="https://github.com/user-attachments/assets/f455c8e8-2cf0-42fe-88da-76424449e88b" />  
-
-
 ## What's in here
 
 ```
@@ -76,9 +73,9 @@ From there:
 | Use Claude Code via Copilot | `claudio` |
 | Use Claude Code as usual | `claude` |
 | Open the control panel | <http://localhost:3000> |
-| Re-authenticate (e.g. switch GitHub accounts) | Control panel → **/auth → Re-authenticate** |
-| Revoke and forget tokens | Control panel → **/auth → Revoke** |
 | Stop everything | `podman compose down` |
+
+<img width="1012" height="1617" alt="image" src="https://github.com/user-attachments/assets/f455c8e8-2cf0-42fe-88da-76424449e88b" />  
 
 ## Architecture
 
@@ -126,7 +123,8 @@ Edit `litellm/config.yaml` and `podman compose restart claudio` to change the ma
 
 - **Translation fidelity.** LiteLLM's Anthropic-unified endpoint translates Messages ↔ OpenAI Chat. Tool use works. Anthropic-specific features — extended thinking, prompt caching, fine-grained beta headers — won't translate cleanly.
 - **GitHub Copilot ToS.** Copilot's terms restrict usage to "supported IDEs and integrations." Routing through a third-party CLI is a gray area. Decide for yourself.
-- **Cost framing.** Copilot is flat-rate, so "real" cost is constant. The `/spend` page shows **shadow cost** — what these tokens *would* cost on the Anthropic API.
+- **Cost framing.** Copilot is flat-rate, so "real" cost is constant. The `usage` section shows **shadow cost** — what these tokens *would* cost on the Anthropic API.
+- **No database (striclty speaking).** Usage is stored on a file, removing the stored container will wipe all history
 - **LiteLLM security advisory.** Versions 1.82.7 and 1.82.8 were compromised on PyPI. The Dockerfile pins `>=1.83.0` by default.
 
 ## Troubleshooting (Podman on Windows)
