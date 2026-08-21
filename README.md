@@ -8,7 +8,7 @@ Works great on that HP laptop IT handed you.
 
 ---
 
-Under the hood: each developer runs a small local container that exposes a [LiteLLM](https://docs.litellm.ai/) proxy translating Anthropic's Messages API to Copilot's OpenAI-shaped backend, plus a Next.js control panel for OAuth, model selection, and shadow-cost tracking.
+Under the hood: each developer runs a small local container that exposes a [LiteLLM](https://docs.litellm.ai/) proxy pointing Anthropic's Messages API at Copilot's Claude models, plus a Next.js control panel for OAuth, model selection, and usage tracking.
 
 A `claudio` PowerShell wrapper switches Claude Code over to the proxy on demand:
 
@@ -23,8 +23,8 @@ claudio      # talks to GitHub Copilot via the local LiteLLM proxy
 .
 ├── compose.yaml            # podman compose / docker compose
 ├── Dockerfile              # one image: LiteLLM + Next.js (supervisord)
-├── litellm/config.yaml     # claude-* alias map -> github_copilot/*
-├── supervisor/             # supervisord config
+├── litellm/                # proxy base config + model-list generator
+├── supervisor/             # supervisord config + litellm launcher
 ├── webapp/                 # Next.js control panel
 └── scripts/                # setup.{ps1,sh}, claudio.{ps1,sh}, install/uninstall
 ```
@@ -91,40 +91,51 @@ From there:
 │  Container: claudio                         │
 │                                             │
 │  :4000  LiteLLM ──► GitHub Copilot API     │
-│         translates Messages ↔ OpenAI Chat   │
+│         1:1 pass-through for Claude models  │
 │                                             │
 │  :3000  Next.js control panel               │
-│         OAuth wizard, models, spend         │
+│         OAuth wizard, models, usage         │
 │                                             │
 │  /data/copilot   (named vol, OAuth tokens)  │
-│  /data/litellm   (named vol, spend SQLite)  │
+│  /data/litellm   (named vol, model catalog  │
+│                   + spend JSONL)            │
+│  /data/claudio   (named vol, preferences)   │
 └─────────────────────────────────────────────┘
 ```
 
-### Model name aliasing
+### Model discovery
 
-Claude Code's `/v1/models` discovery only adds models whose IDs start with `claude` or `anthropic`. Copilot returns `gpt-4`, `gpt-5.1-codex`, etc., so `litellm/config.yaml` aliases them:
+Nothing here is hardcoded. On every proxy start, `litellm/generate_config.py` asks GitHub Copilot which models your subscription can reach (`GET https://api.githubcopilot.com/models`) and generates LiteLLM's `model_list` from the answer. A model GitHub adds tomorrow shows up in your `/model` picker after one refresh.
+
+The one constraint it works around: Claude Code's `/v1/models` discovery only adds models whose IDs start with `claude` or `anthropic`. So Copilot's Anthropic models pass through 1:1, and everything else gets a readable prefix:
 
 ```yaml
-- model_name: claude-opus-4-7
+# generated -> /data/litellm/config.generated.yaml
+- model_name: claude-opus-5              # Copilot's own id, unchanged
   litellm_params:
-    model: github_copilot/gpt-5.1-codex
-- model_name: claude-sonnet-4-6
+    model: github_copilot/claude-opus-5
+- model_name: claude-opus-4-8            # dash twin, for ANTHROPIC_DEFAULT_*_MODEL
   litellm_params:
-    model: github_copilot/gpt-5.1-codex
-- model_name: claude-haiku-4-5
+    model: github_copilot/claude-opus-4.8
+- model_name: claude-via-gpt-5.4         # non-Anthropic, opt-in fallback
   litellm_params:
-    model: github_copilot/gpt-4
+    model: github_copilot/gpt-5.4
 ```
 
-Edit `litellm/config.yaml` and `podman compose restart claudio` to change the mapping. (UI-driven editing is on the v2 list.)
+`opus` / `sonnet` / `haiku` default to **auto** — whichever version of that family is newest in the catalog right now. Pin a specific one from the control panel if you'd rather not move. Hit **refresh** in the models section to re-read the catalog (it restarts LiteLLM, so don't do it mid-session).
+
+### Usage numbers
+
+The usage panel reports `input + output` as "tokens" and shows prompt-cache reads separately. That's deliberate: Claude Code re-sends its whole conversation every turn and serves most of it from cache, so adding up raw prompt tokens reads roughly an order of magnitude higher than anything you actually consumed. Time buckets follow your browser's timezone, not the container's.
+
+The number that maps to money on a Copilot plan is **premium requests**, shown against your plan's entitlement in the status row.
 
 ## Trade-offs to know about
 
-- **Translation fidelity.** LiteLLM's Anthropic-unified endpoint translates Messages ↔ OpenAI Chat. Tool use works. Anthropic-specific features — extended thinking, prompt caching, fine-grained beta headers — won't translate cleanly.
 - **GitHub Copilot ToS.** Copilot's terms restrict usage to "supported IDEs and integrations." Routing through a third-party CLI is a gray area. Decide for yourself.
-- **Cost framing.** Copilot is flat-rate, so "real" cost is constant. The `usage` section shows **shadow cost** — what these tokens *would* cost on the Anthropic API.
-- **No database (striclty speaking).** Usage is stored on a file, removing the stored container will wipe all history
+- **Non-Claude fallbacks.** The `claude-via-*` aliases route to OpenAI/Google models through LiteLLM's Messages ↔ OpenAI Chat translation. Tool use works; Anthropic-specific features (extended thinking, prompt caching, beta headers) won't translate cleanly. The real Claude routes are 1:1 pass-throughs and don't have this problem.
+- **Cost framing.** Copilot is flat-rate, so "real" cost is constant. Token figures are informational; premium-request count is what your plan meters.
+- **No database (strictly speaking).** Usage history is a JSONL file on the `claudio_litellm` named volume. It survives `podman compose down`; `down -v` wipes it.
 - **LiteLLM security advisory.** Versions 1.82.7 and 1.82.8 were compromised on PyPI. The Dockerfile pins `>=1.83.0` by default.
 
 ## Troubleshooting (Podman on Windows)

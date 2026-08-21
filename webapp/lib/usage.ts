@@ -1,20 +1,43 @@
-// Read-only aggregates over /data/litellm/spend.jsonl. Same source the
-// existing getSpendByDay() reads from, but rolled up into shapes the
-// consolidated dashboard needs (sparkline, recent calls, today/week totals).
+// Read-only aggregates over /data/litellm/spend.jsonl (written by
+// litellm/spend_logger.py), rolled up into the shapes the dashboard needs.
+//
+// Two things worth knowing before changing anything here:
+//
+// * **Tokens are split, not summed.** A record carries `input_tokens`
+//   (genuinely new context), `output_tokens`, and separately
+//   `cache_read_tokens` / `cache_write_tokens`. The headline "tokens" figure
+//   is input + output. Summing raw prompt_tokens instead — which is what this
+//   file used to do — counts every re-sent turn and every prompt-cache read at
+//   full weight, which for Claude Code overstates consumption by 10-100x.
+//
+// * **Buckets are anchored to a caller-supplied IANA zone**, not UTC. The
+//   container runs in UTC; the person reading the dashboard doesn't. Day
+//   boundaries and hour columns are computed with Intl so DST is handled.
 
-import { readFile } from "node:fs/promises";
+import { open } from "node:fs/promises";
 
 const SPEND_LOG_PATH = process.env.CLAUDIO_SPEND_LOG ?? "/data/litellm/spend.jsonl";
 
+// The dashboard polls every few seconds and the log is append-only, so cap how
+// much of it we ever parse. 8 MB is comfortably more than the 30-day window at
+// ~200 bytes/record.
+const MAX_READ_BYTES = 8 * 1024 * 1024;
+
+export const DEFAULT_TZ = process.env.CLAUDIO_TZ || "UTC";
+
 export type RawCall = {
+  id: string;
   ts: string;
   status: string;
   model: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
   cost: number;
   duration_ms: number;
+  ttft_ms: number;
+  stream: boolean;
   quota?: RawQuota;
 };
 
@@ -31,45 +54,53 @@ export type RawQuota = {
   };
 };
 
-export type DailyBucket = {
-  date: string;       // YYYY-MM-DD (UTC)
+/** Token counts, always split. `tokens` (= input + output) is the headline. */
+export type Tokens = {
   tokens: number;
-  requests: number;
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
 };
 
-export type HourlyBucket = {
-  hour: string;       // YYYY-MM-DDTHH (UTC) — keeps timezone explicit
-  label: string;      // HH:00 (UTC)
-  tokens: number;
-  requests: number;
+export type Totals = Tokens & { requests: number };
+
+export type DailyBucket = Totals & {
+  date: string; // YYYY-MM-DD in the requested zone
+};
+
+export type HourlyBucket = Totals & {
+  hour: string;  // YYYY-MM-DDTHH in the requested zone
+  label: string; // HH:00
 };
 
 export type HeatmapDay = {
-  date: string;        // YYYY-MM-DD
-  tokens_by_hour: number[];   // 24 entries (UTC hour 0..23)
-  requests_by_hour: number[]; // 24 entries
+  date: string;
+  tokens_by_hour: number[];   // 24 entries, input + output
+  requests_by_hour: number[];
+  cache_by_hour: number[];    // cache_read + cache_write, for the tooltip
 };
 
 export type RecentCall = {
   ts: string;
   model: string;
-  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
   status: string;
   duration_ms: number;
+  ttft_ms: number;
+  stream: boolean;
 };
 
 export type UsageSummary = {
-  today_tokens: number;
-  today_requests: number;
-  week_tokens: number;
-  week_requests: number;
-  spark: string;             // 14-char unicode bar string, oldest -> newest
-  daily: DailyBucket[];      // 30 entries, oldest -> newest, zero-filled
+  tz: string;
+  last_24h: Totals;          // rolling window, not calendar day
+  daily: DailyBucket[];      // `days` entries, oldest -> newest, zero-filled
   hourly: HourlyBucket[];    // 24 entries, oldest -> newest, zero-filled
-  heatmap: HeatmapDay[];     // 30 entries, oldest -> newest, day×hour matrix
+  heatmap: HeatmapDay[];     // one per daily entry, day x hour matrix
   recent: RecentCall[];      // last 10, newest first
-  requests_24h: number;      // last rolling 24h, success + failure
-  avg_latency_ms: number;    // mean duration_ms over the last 24h (success only)
+  avg_ttft_ms: number;       // mean time-to-first-token over the last 24h
   quota: {
     limit: number | null;     // monthly entitlement (e.g. 300 for Pro)
     remaining: number | null; // absolute requests left (totRem)
@@ -79,174 +110,242 @@ export type UsageSummary = {
   };
 };
 
-const BAR = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+/* -------------------------------------------------------------------------- */
+/*  Timezone helpers                                                          */
+/* -------------------------------------------------------------------------- */
 
-export function sparkline(values: number[]): string {
-  if (values.length === 0) return BAR[0];
-  const max = Math.max(...values);
-  if (max === 0) return BAR[0].repeat(values.length);
-  return values
-    .map((v) => {
-      const idx = Math.min(BAR.length - 1, Math.round((v / max) * (BAR.length - 1)));
-      return BAR[idx];
-    })
-    .join("");
-}
-
-async function readAllCalls(): Promise<RawCall[]> {
-  let raw: string;
+/** An IANA zone we can actually format in, else the container default. */
+export function safeTimeZone(tz: string | null | undefined): string {
+  if (!tz) return DEFAULT_TZ;
   try {
-    raw = await readFile(SPEND_LOG_PATH, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    return [];
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz });
+    return tz;
+  } catch {
+    return DEFAULT_TZ;
   }
-  const out: RawCall[] = [];
-  for (const line of raw.split("\n")) {
-    if (!line) continue;
-    try {
-      const r = JSON.parse(line) as Record<string, unknown>;
-      const call: RawCall = {
-        ts: String(r.ts ?? ""),
-        status: String(r.status ?? "success"),
-        model: String(r.model ?? "unknown"),
-        prompt_tokens: numberOr(r.prompt_tokens, 0),
-        completion_tokens: numberOr(r.completion_tokens, 0),
-        total_tokens: numberOr(r.total_tokens, 0),
-        cost: numberOr(r.cost, 0),
-        duration_ms: numberOr(r.duration_ms, 0),
-      };
-      if (r.quota && typeof r.quota === "object") {
-        call.quota = r.quota as RawQuota;
-      }
-      out.push(call);
-    } catch {
-      // skip malformed lines
-    }
-  }
-  return out;
 }
+
+type ZonedParts = { date: string; hour: number };
+
+/**
+ * Wall-clock date + hour in `tz`. One formatter is built per call to
+ * getUsageSummary and reused for every record — constructing an
+ * Intl.DateTimeFormat per row is the slow way to do this.
+ */
+function zonedPartsFactory(tz: string): (t: number) => ZonedParts {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  });
+  return (t: number) => {
+    const parts = fmt.formatToParts(new Date(t));
+    let y = "", m = "", d = "", h = "0";
+    for (const p of parts) {
+      if (p.type === "year") y = p.value;
+      else if (p.type === "month") m = p.value;
+      else if (p.type === "day") d = p.value;
+      else if (p.type === "hour") h = p.value;
+    }
+    // en-CA with hour12:false yields "24" for midnight in some ICU versions.
+    const hour = Number(h) % 24;
+    return { date: `${y}-${m}-${d}`, hour };
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Reading                                                                   */
+/* -------------------------------------------------------------------------- */
 
 function numberOr(v: unknown, fallback: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function ymd(d: Date): string {
-  return d.toISOString().slice(0, 10);
+/** Tail of the spend log, dropping a leading partial line. */
+async function readTail(): Promise<string> {
+  let handle;
+  try {
+    handle = await open(SPEND_LOG_PATH, "r");
+  } catch {
+    return "";
+  }
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - MAX_READ_BYTES);
+    const length = size - start;
+    if (length <= 0) return "";
+    const buf = Buffer.allocUnsafe(length);
+    await handle.read(buf, 0, length, start);
+    const text = buf.toString("utf8");
+    if (start === 0) return text;
+    const nl = text.indexOf("\n");
+    return nl === -1 ? "" : text.slice(nl + 1);
+  } catch {
+    return "";
+  } finally {
+    await handle.close().catch(() => {});
+  }
 }
 
-export async function getUsageSummary(days = 30): Promise<UsageSummary> {
+async function readAllCalls(): Promise<RawCall[]> {
+  const raw = await readTail();
+  const out: RawCall[] = [];
+  // LiteLLM drives both the sync and the async success handler for one call.
+  // spend_logger.py already de-dupes in-process, but it only remembers the
+  // last few thousand ids and forgets everything on restart, so re-check here.
+  const seen = new Set<string>();
+
+  for (const line of raw.split("\n")) {
+    if (!line) continue;
+    let r: Record<string, unknown>;
+    try {
+      r = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue; // partial write at crash, or a pre-v2 line
+    }
+    if (numberOr(r.v, 0) < 2) continue; // schema v1 counted cache reads as input
+    const id = String(r.id ?? "");
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    const call: RawCall = {
+      id,
+      ts: String(r.ts ?? ""),
+      status: String(r.status ?? "success"),
+      model: String(r.model ?? "unknown"),
+      input_tokens: numberOr(r.input_tokens, 0),
+      output_tokens: numberOr(r.output_tokens, 0),
+      cache_read_tokens: numberOr(r.cache_read_tokens, 0),
+      cache_write_tokens: numberOr(r.cache_write_tokens, 0),
+      cost: numberOr(r.cost, 0),
+      duration_ms: numberOr(r.duration_ms, 0),
+      ttft_ms: numberOr(r.ttft_ms, 0),
+      stream: r.stream === true,
+    };
+    if (r.quota && typeof r.quota === "object") {
+      call.quota = r.quota as RawQuota;
+    }
+    out.push(call);
+  }
+  return out;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Aggregation                                                               */
+/* -------------------------------------------------------------------------- */
+
+function emptyTotals(): Totals {
+  return {
+    tokens: 0,
+    input: 0,
+    output: 0,
+    cache_read: 0,
+    cache_write: 0,
+    requests: 0,
+  };
+}
+
+function accumulate(into: Totals, c: RawCall): void {
+  into.input += c.input_tokens;
+  into.output += c.output_tokens;
+  into.cache_read += c.cache_read_tokens;
+  into.cache_write += c.cache_write_tokens;
+  into.tokens += c.input_tokens + c.output_tokens;
+  into.requests += 1;
+}
+
+export async function getUsageSummary(
+  days = 30,
+  timeZone?: string | null,
+): Promise<UsageSummary> {
+  const tz = safeTimeZone(timeZone);
+  const zoned = zonedPartsFactory(tz);
   const calls = await readAllCalls();
   const now = Date.now();
 
-  // Today / week totals + 24h aggregates for the processes panel.
-  const todayKey = ymd(new Date(now));
-  const weekCutoff = now - 7 * 24 * 60 * 60 * 1000;
   const day24Cutoff = now - 24 * 60 * 60 * 1000;
-  let today_tokens = 0,
-    today_requests = 0,
-    week_tokens = 0,
-    week_requests = 0,
-    requests_24h = 0,
-    latency_sum = 0,
-    latency_n = 0;
-  for (const c of calls) {
-    const t = Date.parse(c.ts);
-    if (!Number.isFinite(t)) continue;
-    if (ymd(new Date(t)) === todayKey) {
-      today_tokens += c.total_tokens;
-      today_requests += 1;
-    }
-    if (t >= weekCutoff) {
-      week_tokens += c.total_tokens;
-      week_requests += 1;
-    }
-    if (t >= day24Cutoff) {
-      requests_24h += 1;
-      if (c.status === "success" && c.duration_ms > 0) {
-        latency_sum += c.duration_ms;
-        latency_n += 1;
-      }
-    }
-  }
-  const avg_latency_ms = latency_n > 0 ? Math.round(latency_sum / latency_n) : 0;
 
-  // Daily buckets, zero-filled, oldest -> newest.
+  const last_24h = emptyTotals();
+  let ttft_sum = 0;
+  let ttft_n = 0;
+
+  // Daily buckets, zero-filled, oldest -> newest. Walking back in 24h steps
+  // and re-deriving the zoned date each time keeps DST-shifted days correct.
   const daily: DailyBucket[] = [];
-  const bucketMap = new Map<string, DailyBucket>();
+  const dailyMap = new Map<string, DailyBucket>();
   for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(now - i * 24 * 60 * 60 * 1000);
-    const key = ymd(d);
-    const bucket: DailyBucket = { date: key, tokens: 0, requests: 0 };
+    const date = zoned(now - i * 24 * 60 * 60 * 1000).date;
+    if (dailyMap.has(date)) continue;
+    const bucket: DailyBucket = { date, ...emptyTotals() };
     daily.push(bucket);
-    bucketMap.set(key, bucket);
-  }
-  for (const c of calls) {
-    const t = Date.parse(c.ts);
-    if (!Number.isFinite(t)) continue;
-    const key = ymd(new Date(t));
-    const bucket = bucketMap.get(key);
-    if (bucket) {
-      bucket.tokens += c.total_tokens;
-      bucket.requests += 1;
-    }
+    dailyMap.set(date, bucket);
   }
 
-  // Sparkline shows the last 14 days regardless of how many we keep around.
-  const spark = sparkline(daily.slice(-14).map((d) => d.tokens));
-
-  // Hourly buckets for the 24h chart range. Keys are floor-to-hour UTC
-  // timestamps. Format YYYY-MM-DDTHH so timezone is explicit.
+  // Hourly buckets for the 24h range.
   const hourly: HourlyBucket[] = [];
   const hourlyMap = new Map<string, HourlyBucket>();
   for (let i = 23; i >= 0; i--) {
-    const d = new Date(now - i * 60 * 60 * 1000);
-    const hour = `${ymd(d)}T${String(d.getUTCHours()).padStart(2, "0")}`;
-    const label = `${String(d.getUTCHours()).padStart(2, "0")}:00`;
-    const bucket: HourlyBucket = { hour, label, tokens: 0, requests: 0 };
+    const { date, hour } = zoned(now - i * 60 * 60 * 1000);
+    const hh = String(hour).padStart(2, "0");
+    const key = `${date}T${hh}`;
+    if (hourlyMap.has(key)) continue;
+    const bucket: HourlyBucket = {
+      hour: key,
+      label: `${hh}:00`,
+      ...emptyTotals(),
+    };
     hourly.push(bucket);
-    hourlyMap.set(hour, bucket);
-  }
-  for (const c of calls) {
-    const t = Date.parse(c.ts);
-    if (!Number.isFinite(t)) continue;
-    const d = new Date(t);
-    const key = `${ymd(d)}T${String(d.getUTCHours()).padStart(2, "0")}`;
-    const bucket = hourlyMap.get(key);
-    if (bucket) {
-      bucket.tokens += c.total_tokens;
-      bucket.requests += 1;
-    }
+    hourlyMap.set(key, bucket);
   }
 
-  // Day × hour matrix for the heatmap. One row per day in `daily`, each
-  // row carries 24 entries (UTC hour 0..23).
+  // Day x hour matrix, one row per daily bucket.
   const heatmapMap = new Map<string, HeatmapDay>();
   const heatmap: HeatmapDay[] = daily.map((d) => {
     const row: HeatmapDay = {
       date: d.date,
       tokens_by_hour: new Array(24).fill(0),
       requests_by_hour: new Array(24).fill(0),
+      cache_by_hour: new Array(24).fill(0),
     };
     heatmapMap.set(d.date, row);
     return row;
   });
+
   for (const c of calls) {
     const t = Date.parse(c.ts);
     if (!Number.isFinite(t)) continue;
-    const d = new Date(t);
-    const row = heatmapMap.get(ymd(d));
+    const { date, hour } = zoned(t);
+
+    if (t >= day24Cutoff) {
+      accumulate(last_24h, c);
+      if (c.status === "success" && c.ttft_ms > 0) {
+        ttft_sum += c.ttft_ms;
+        ttft_n += 1;
+      }
+    }
+
+    const dayBucket = dailyMap.get(date);
+    if (dayBucket) accumulate(dayBucket, c);
+
+    const hourBucket = hourlyMap.get(`${date}T${String(hour).padStart(2, "0")}`);
+    if (hourBucket) accumulate(hourBucket, c);
+
+    const row = heatmapMap.get(date);
     if (row) {
-      const h = d.getUTCHours();
-      row.tokens_by_hour[h] += c.total_tokens;
-      row.requests_by_hour[h] += 1;
+      row.tokens_by_hour[hour] += c.input_tokens + c.output_tokens;
+      row.requests_by_hour[hour] += 1;
+      row.cache_by_hour[hour] += c.cache_read_tokens + c.cache_write_tokens;
     }
   }
 
   // Walk backward to find the most recent call that carried Copilot's
   // x-quota-snapshot-premium_interactions header. Premium interactions is
-  // the bucket that gates Claude 4.x and the other paid models — chat/
+  // the bucket that gates Claude 4.x/5 and the other paid models — chat/
   // completions buckets are unlimited (-1) on most plans.
   let quota: UsageSummary["quota"] = {
     limit: null,
@@ -261,9 +360,7 @@ export async function getUsageSummary(days = 30): Promise<UsageSummary> {
     const limit = q.entitlement != null ? Number(q.entitlement) : NaN;
     const remaining = q.remaining != null ? Number(q.remaining) : NaN;
     const reset =
-      q.reset_at != null
-        ? Math.floor(Date.parse(q.reset_at) / 1000)
-        : NaN;
+      q.reset_at != null ? Math.floor(Date.parse(q.reset_at) / 1000) : NaN;
     if (
       Number.isFinite(limit) ||
       Number.isFinite(remaining) ||
@@ -283,7 +380,6 @@ export async function getUsageSummary(days = 30): Promise<UsageSummary> {
     }
   }
 
-  // Last 10 calls, newest first.
   const recent: RecentCall[] = calls
     .slice(-30)
     .reverse()
@@ -291,23 +387,23 @@ export async function getUsageSummary(days = 30): Promise<UsageSummary> {
     .map((c) => ({
       ts: c.ts,
       model: c.model,
-      total_tokens: c.total_tokens,
+      input_tokens: c.input_tokens,
+      output_tokens: c.output_tokens,
+      cache_read_tokens: c.cache_read_tokens,
       status: c.status,
       duration_ms: c.duration_ms,
+      ttft_ms: c.ttft_ms,
+      stream: c.stream,
     }));
 
   return {
-    today_tokens,
-    today_requests,
-    week_tokens,
-    week_requests,
-    spark,
+    tz,
+    last_24h,
     daily,
     hourly,
     heatmap,
     recent,
-    requests_24h,
-    avg_latency_ms,
+    avg_ttft_ms: ttft_n > 0 ? Math.round(ttft_sum / ttft_n) : 0,
     quota,
   };
 }

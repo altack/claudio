@@ -42,24 +42,41 @@ Open the control panel: http://localhost:3000
     exit 1
 }
 
-# Defaults used when the webapp is unreachable or hasn't been told otherwise.
-# These match the hardcoded values from before /api/preferences existed.
-$opusDefault   = 'claude-opus-4-7'
-$sonnetDefault = 'claude-sonnet-4-6'
-$haikuDefault  = 'claude-haiku-4-5'
-
-# Pull per-tier defaults from the webapp. The user picks them in /; the
-# webapp persists them on the claudio_app named volume. Soft-fail to the
-# hardcoded values if the webapp can't be reached so the wrapper still
-# works headless (boot-time, network blip, podman not started yet).
+# Per-tier defaults. Nothing is hardcoded here: the webapp resolves each tier
+# against the models the gateway is actually serving right now (which come
+# from GitHub Copilot's live catalog), and returns them as KEY=value lines.
+# We cache the answer so the wrapper still works when the proxy is up but the
+# webapp hasn't finished booting.
+$defaultsCache = Join-Path $env:USERPROFILE '.claudio\defaults.env'
+$defaultsBody  = $null
 try {
-    $prefs = Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/preferences' `
-        -Method Get -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
-    if ($prefs.opus)   { $opusDefault   = $prefs.opus }
-    if ($prefs.sonnet) { $sonnetDefault = $prefs.sonnet }
-    if ($prefs.haiku)  { $haikuDefault  = $prefs.haiku }
+    $defaultsBody = Invoke-RestMethod -TimeoutSec 2 -Method Get -ErrorAction Stop `
+        -Uri 'http://127.0.0.1:3000/api/preferences?format=env'
+    if ($defaultsBody) {
+        # .NET WriteAllText gives UTF-8 with no BOM on both PS 5.1 and 7;
+        # Set-Content -Encoding utf8 differs between them and a stray BOM
+        # would break the first line's regex on read-back.
+        [System.IO.File]::WriteAllText($defaultsCache, $defaultsBody)
+    }
 } catch {
-    # silent fallback; not worth a warning for a transient network issue
+    # webapp not up yet - fall through to the last answer it gave us
+}
+if (-not $defaultsBody -and (Test-Path -LiteralPath $defaultsCache)) {
+    $defaultsBody = [System.IO.File]::ReadAllText($defaultsCache)
+}
+
+$modelDefaults = @{}
+if ($defaultsBody) {
+    foreach ($line in ($defaultsBody -split "`r?`n")) {
+        if ($line -match '^(ANTHROPIC_DEFAULT_[A-Z]+_MODEL)=([A-Za-z0-9._-]+)$') {
+            $modelDefaults[$Matches[1]] = $Matches[2]
+        }
+    }
+}
+if ($modelDefaults.Count -eq 0) {
+    # Better to leave the vars unset than to pin an alias the gateway may not
+    # serve - Claude Code will at least fail with a name you recognise.
+    Write-Warning "No model defaults available (control panel unreachable, nothing cached). '/model opus|sonnet|haiku' may not resolve; pass --model <alias> explicitly."
 }
 
 # PowerShell scoping rule: $env:VAR writes go to the actual process
@@ -113,9 +130,9 @@ try {
     $env:ANTHROPIC_AUTH_TOKEN = $config.master_key
     # Pin alias resolution to the IDs the gateway actually serves. Without this
     # `/model sonnet` could resolve to an ID the gateway doesn't recognise.
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL   = $opusDefault
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = $sonnetDefault
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL  = $haikuDefault
+    foreach ($entry in $modelDefaults.GetEnumerator()) {
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+    }
 
     # claude is in PATH already (Claude Code installs itself globally). Pass
     # through every argument verbatim so flags like --print or --model work.

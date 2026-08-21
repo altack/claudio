@@ -21,6 +21,9 @@ services:
     environment:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
       - GITHUB_COPILOT_TOKEN_DIR=/data/copilot
+      # Timezone used for server-rendered usage buckets before the browser
+      # tells us its own. Optional — defaults to UTC.
+      - CLAUDIO_TZ
       # Optional GHE overrides; only forwarded when set in .env / shell.
       - GITHUB_COPILOT_API_BASE
       - GITHUB_COPILOT_DEVICE_CODE_URL
@@ -30,8 +33,10 @@ services:
       # Named volumes only - bind mounts on Podman+Windows are unreliable
       # because of WSL2 path translation and rootless permission mapping.
       - claudio_copilot:/data/copilot
-      # Spend log JSONL written by litellm/spend_logger.py and read by
-      # the webapp's /spend page. Survives `compose down`; `down -v` drops it.
+      # Generated LiteLLM config + cached Copilot model catalog (written by
+      # litellm/generate_config.py) and the spend JSONL (written by
+      # litellm/spend_logger.py, read by the dashboard's usage panel).
+      # Survives `compose down`; `down -v` drops it.
       - claudio_litellm:/data/litellm
       # User preferences (default model per tier) edited from the webapp
       # and read by scripts/claudio.ps1 over HTTP on each invocation.

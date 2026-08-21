@@ -14,9 +14,10 @@ if [[ ! -f "$config_path" ]]; then
   exit 1
 fi
 
-# We control both files we parse here (~/.claudio/config.json and the
-# webapp's /api/preferences response), so a sed-based extractor is enough —
-# no jq dependency to install on the user's machine.
+# Only used for ~/.claudio/config.json, which we write ourselves and which is
+# flat — no jq dependency to install on the user's machine. Model defaults come
+# back as plain KEY=value lines precisely so this never has to parse anything
+# nested.
 extract_json_string() {
   local key=$1 src=$2
   sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" <<<"$src" | head -n1
@@ -43,30 +44,38 @@ fi
 export ANTHROPIC_BASE_URL=http://127.0.0.1:4000
 export ANTHROPIC_AUTH_TOKEN=$master_key
 
-# Defaults used when the webapp is unreachable or hasn't been told otherwise.
-opus_default=claude-opus-4-7
-sonnet_default=claude-sonnet-4-6
-haiku_default=claude-haiku-4-5
-
-# Pull per-tier defaults from the webapp. The user picks them in /; the
-# webapp persists them on the claudio_app named volume. Soft-fail to the
-# hardcoded values if the webapp can't be reached so the wrapper still
-# works headless.
-prefs=$(curl -fsS --max-time 2 http://127.0.0.1:3000/api/preferences 2>/dev/null || true)
-if [[ -n "$prefs" ]]; then
-  o=$(extract_json_string opus   "$prefs")
-  s=$(extract_json_string sonnet "$prefs")
-  h=$(extract_json_string haiku  "$prefs")
-  [[ -n "$o" ]] && opus_default=$o
-  [[ -n "$s" ]] && sonnet_default=$s
-  [[ -n "$h" ]] && haiku_default=$h
+# Per-tier defaults. Nothing is hardcoded here: the webapp resolves each tier
+# against the models the gateway is actually serving right now (which come from
+# GitHub Copilot's live catalog) and returns them as KEY=value lines. We cache
+# the answer so the wrapper still works when the proxy is up but the webapp
+# hasn't finished booting.
+defaults_cache=$HOME/.claudio/defaults.env
+defaults_url='http://127.0.0.1:3000/api/preferences?format=env'
+defaults=$(curl -fsS --max-time 2 "$defaults_url" 2>/dev/null || true)
+if [[ -n "$defaults" ]]; then
+  mkdir -p "$(dirname "$defaults_cache")"
+  printf '%s\n' "$defaults" >"$defaults_cache"
+elif [[ -f "$defaults_cache" ]]; then
+  defaults=$(cat "$defaults_cache")
 fi
 
-# Pin alias resolution to the IDs the gateway actually serves. Without this
-# `/model sonnet` could resolve to an ID the gateway doesn't recognise.
-export ANTHROPIC_DEFAULT_OPUS_MODEL=$opus_default
-export ANTHROPIC_DEFAULT_SONNET_MODEL=$sonnet_default
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=$haiku_default
+# Here-string, not a pipe: the loop has to run in this shell for `export` to
+# stick. Both key and value are validated so a mangled response can't inject
+# arbitrary variables into claude's environment.
+applied=0
+while IFS='=' read -r key value; do
+  [[ $key =~ ^ANTHROPIC_DEFAULT_[A-Z]+_MODEL$ ]] || continue
+  [[ $value =~ ^[A-Za-z0-9._-]+$ ]] || continue
+  export "$key=$value"
+  applied=$((applied + 1))
+done <<<"$defaults"
+
+if (( applied == 0 )); then
+  # Better to leave the vars unset than to pin an alias the gateway may not
+  # serve - claude will at least fail with a name you recognise.
+  echo "claudio: no model defaults available (control panel unreachable, nothing cached)." >&2
+  echo "         '/model opus|sonnet|haiku' may not resolve; pass --model <alias> explicitly." >&2
+fi
 
 # Heartbeat to the webapp so the dashboard can show "claudio running" while
 # this script is alive. Soft-fails if the webapp is down; the proxy is what

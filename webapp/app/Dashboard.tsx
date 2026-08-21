@@ -13,32 +13,32 @@ import { toast } from "sonner";
 import type { ModelMapping, HealthResult } from "@/lib/litellm";
 import ChatPanel from "@/components/ChatPanel";
 import type { AuthSnapshot } from "@/lib/copilot-auth";
-import type { Preferences, Tier } from "@/lib/preferences";
-import type { UsageSummary } from "@/lib/usage";
-
-// Inlined here (not imported from lib/preferences) so this client bundle
-// doesn't drag node:fs in by transitive import.
-function tierOf(alias: string): Tier | null {
-  const a = alias.toLowerCase();
-  if (a.includes("opus")) return "opus";
-  if (a.includes("sonnet")) return "sonnet";
-  if (a.includes("haiku")) return "haiku";
-  return null;
-}
+import type { CatalogMeta } from "@/lib/catalog";
+// lib/models is deliberately free of node: imports, so the client shares the
+// server's tier + version logic instead of keeping a second copy of it.
+import { AUTO, tierOf, type ResolvedPreferences, type Tier } from "@/lib/models";
+import type { RecentCall, Totals, UsageSummary } from "@/lib/usage";
 
 type DashboardState = {
   proxy: HealthResult;
   auth: AuthSnapshot;
-  preferences: Preferences;
+  preferences: ResolvedPreferences;
   usage: UsageSummary;
   models: ModelMapping[];
   models_error: string | null;
+  catalog: CatalogMeta;
   sessions: { active: number };
 };
 
 const POLL_MS = 5_000;
 
 type Range = "24h" | "7d" | "30d";
+
+const RANGE_LABEL: Record<Range, string> = {
+  "24h": "last 24 hours",
+  "7d": "last 7 days",
+  "30d": "last 30 days",
+};
 
 // Drives the relative-time labels ("refresh in N"). useSyncExternalStore
 // reads `Date.now()` after hydration without a setState-in-effect cascade,
@@ -58,6 +58,7 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
   const router = useRouter();
   const [state, setState] = useState<DashboardState>(initial);
   const [signingOut, setSigningOut] = useState(false);
+  const [refreshingModels, setRefreshingModels] = useState(false);
   const [pendingTier, setPendingTier] = useState<Tier | null>(null);
   const [range, setRange] = useState<Range>("7d");
   const [chatModel, setChatModel] = useState<string | null>(null);
@@ -70,51 +71,63 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
   );
   const cancelledRef = useRef(false);
 
-  // Background poll — keep the dashboard fresh without flicker.
+  // Buckets are computed server-side, so the server needs to know which zone
+  // to compute them in. It rendered this page in the container's zone (UTC);
+  // every fetch from here on carries the browser's.
+  const fetchDashboard = useCallback(async (): Promise<DashboardState> => {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+    const r = await fetch(`/api/dashboard?tz=${encodeURIComponent(tz)}`, {
+      cache: "no-store",
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return (await r.json()) as DashboardState;
+  }, []);
+
+  // Background poll — keep the dashboard fresh without flicker. The first tick
+  // is immediate so the UTC-rendered SSR view corrects on mount rather than
+  // sitting wrong for a poll interval.
   useEffect(() => {
     cancelledRef.current = false;
-    async function fetchOnce() {
+    async function tick() {
       try {
-        const r = await fetch("/api/dashboard", { cache: "no-store" });
-        if (!r.ok || cancelledRef.current) return;
-        const next = (await r.json()) as DashboardState;
+        const next = await fetchDashboard();
         if (!cancelledRef.current) setState(next);
       } catch {
         // network blip; keep last-good state
       }
     }
-    const id = setInterval(fetchOnce, POLL_MS);
+    void tick();
+    const id = setInterval(tick, POLL_MS);
     return () => {
       cancelledRef.current = true;
       clearInterval(id);
     };
-  }, []);
+  }, [fetchDashboard]);
 
+  // No optimistic write: "auto" resolves server-side against the live model
+  // list, so the server's answer is the only one that can be right.
   const setDefault = useCallback(
     async (tier: Tier, alias: string) => {
-      if (state.preferences[tier] === alias) return;
+      if (state.preferences.stored[tier] === alias) return;
       setPendingTier(tier);
-      // optimistic
-      setState((prev) => ({
-        ...prev,
-        preferences: { ...prev.preferences, [tier]: alias },
-      }));
       try {
         const r = await fetch("/api/preferences", {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ tier, alias }),
         });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const next = (await r.json()) as Preferences;
+        if (!r.ok) {
+          const body = (await r.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(body?.error ?? `HTTP ${r.status}`);
+        }
+        const next = (await r.json()) as ResolvedPreferences;
         setState((prev) => ({ ...prev, preferences: next }));
-        toast.success(`/${tier} → ${alias}`);
+        toast.success(
+          alias === AUTO
+            ? `/${tier} → auto (${next[tier] || "nothing available"})`
+            : `/${tier} → ${alias}`,
+        );
       } catch (err) {
-        // rollback
-        setState((prev) => ({
-          ...prev,
-          preferences: { ...prev.preferences, [tier]: state.preferences[tier] },
-        }));
         toast.error(
           `failed to set ${tier} default: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -122,8 +135,27 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
         setPendingTier(null);
       }
     },
-    [state.preferences],
+    [state.preferences.stored],
   );
+
+  // Re-discovery means restarting LiteLLM (litellm-start.sh re-runs the
+  // generator on each start), so it's an explicit action, never a timer.
+  const refreshModels = useCallback(async () => {
+    setRefreshingModels(true);
+    try {
+      const r = await fetch("/api/models/refresh", { method: "POST" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const next = await fetchDashboard();
+      setState(next);
+      toast.success(`${next.models.length} aliases from copilot`);
+    } catch (err) {
+      toast.error(
+        `refresh failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setRefreshingModels(false);
+    }
+  }, [fetchDashboard]);
 
   const openInClaudio = useCallback(async (alias: string) => {
     const cmd = `claudio --model ${alias}`;
@@ -153,8 +185,8 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
     }
   }, [router]);
 
-  // Group models by tier and dedupe. config.yaml ships dotted (claude-opus-4.7)
-  // and dashed (claude-opus-4-7) aliases that resolve to the same Copilot
+  // Group models by tier and dedupe. The generator mints dotted and dashed
+  // spellings of each Anthropic alias that resolve to the same Copilot
   // backend; showing both is noise. Prefer the user's active pick if one
   // matches, else prefer the dashed form (it's what Claude Code's
   // ANTHROPIC_DEFAULT_*_MODEL env vars use natively), else dotted.
@@ -261,7 +293,7 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
           tone={proxyOk ? "ok" : "err"}
           stateLabel={proxyOk ? "up" : "down"}
           address={proxyOk ? "127.0.0.1:4000" : state.proxy.detail ?? "unreachable"}
-          metric={`${formatN(state.usage.requests_24h)} req/24h`}
+          metric={`${formatN(state.usage.last_24h.requests)} req/24h`}
         />
         <ProcessRow
           name="copilot"
@@ -291,6 +323,7 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
           </span>
         }
       >
+        <UsageMetrics usage={state.usage} range={range} />
         <UsageHeatmap usage={state.usage} range={range} />
       </Section>
 
@@ -300,11 +333,27 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
         collapsible
         storageKey="models"
         right={
-          state.models_error ? (
-            <span className="text-err">!</span>
-          ) : (
-            <span className="text-muted">click to set default · ✓ = active</span>
-          )
+          <span className="flex items-baseline gap-4">
+            {state.models_error ? (
+              <span className="text-err">!</span>
+            ) : (
+              <span className="text-muted">
+                {state.models.length} aliases ·{" "}
+                {state.catalog.fetched_at
+                  ? `catalog ${formatRelative(state.catalog.fetched_at, nowSec)}`
+                  : "catalog not yet discovered"}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={refreshModels}
+              disabled={refreshingModels}
+              title="re-read Copilot's model catalog (restarts litellm)"
+              className="text-muted hover:text-accent underline-offset-4 hover:underline disabled:opacity-50"
+            >
+              {refreshingModels ? "refreshing…" : "refresh"}
+            </button>
+          </span>
         }
       >
         {state.models_error ? (
@@ -315,6 +364,8 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
               tier="opus"
               entries={modelsByTier.opus}
               active={state.preferences.opus}
+              mode={state.preferences.mode.opus}
+              stale={state.preferences.stale.includes("opus")}
               pending={pendingTier === "opus"}
               onSelect={(alias) => setDefault("opus", alias)}
               onChat={(alias) => setChatModel(alias)}
@@ -324,6 +375,8 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
               tier="sonnet"
               entries={modelsByTier.sonnet}
               active={state.preferences.sonnet}
+              mode={state.preferences.mode.sonnet}
+              stale={state.preferences.stale.includes("sonnet")}
               pending={pendingTier === "sonnet"}
               onSelect={(alias) => setDefault("sonnet", alias)}
               onChat={(alias) => setChatModel(alias)}
@@ -333,6 +386,8 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
               tier="haiku"
               entries={modelsByTier.haiku}
               active={state.preferences.haiku}
+              mode={state.preferences.mode.haiku}
+              stale={state.preferences.stale.includes("haiku")}
               pending={pendingTier === "haiku"}
               onSelect={(alias) => setDefault("haiku", alias)}
               onChat={(alias) => setChatModel(alias)}
@@ -354,7 +409,7 @@ export default function Dashboard({ initial }: { initial: DashboardState }) {
         title="recent"
         collapsible
         storageKey="recent"
-        right={<span className="text-muted">last 10 calls</span>}
+        right={<span className="text-muted">in/out · +cache · ttft</span>}
       >
         {state.usage.recent.length === 0 ? (
           <div className="text-muted">
@@ -671,6 +726,8 @@ function TierGroup({
   tier,
   entries,
   active,
+  mode,
+  stale,
   pending,
   onSelect,
   onChat,
@@ -679,28 +736,57 @@ function TierGroup({
   tier: Tier;
   entries: ModelMapping[];
   active: string;
+  mode: "auto" | "pinned";
+  stale: boolean;
   pending: boolean;
   onSelect: (alias: string) => void;
   onChat: (alias: string) => void;
   onOpenInClaudio: (alias: string) => void;
 }) {
   if (entries.length === 0) return null;
+  const isAuto = mode === "auto";
   return (
     <div>
       <div className="flex items-baseline justify-between mb-1">
         <span className="text-[11px] tracking-[0.14em] text-muted uppercase">
           {tier}
         </span>
-        {pending && (
+        {pending ? (
           <span className="text-[11px] text-muted">saving…</span>
-        )}
+        ) : stale ? (
+          <span className="text-[11px] text-warn">
+            pinned model no longer served — using {active || "nothing"}
+          </span>
+        ) : null}
       </div>
       <div>
+        {/* Selecting "auto" is what keeps this tier on whatever Copilot ships
+            next; the row shows which model that resolves to right now. */}
+        <button
+          type="button"
+          onClick={() => onSelect(AUTO)}
+          disabled={pending}
+          className="group flex w-full items-baseline gap-3 py-[4px] text-left hover:bg-[#111111] transition-colors disabled:opacity-50"
+        >
+          <span
+            style={{ width: "2ch" }}
+            className={`shrink-0 ${isAuto ? "text-accent" : "text-dim"}`}
+          >
+            {isAuto ? "✓" : ""}
+          </span>
+          <span className={isAuto ? "text-accent" : "text-muted group-hover:text-fg"}>
+            auto
+          </span>
+          <span className="text-dim text-[12px] truncate">
+            latest {tier} — now {active || "nothing available"}
+          </span>
+        </button>
         {entries.map((m) => (
           <ModelRow
             key={m.alias}
             alias={m.alias}
-            isActive={m.alias === active}
+            isActive={!isAuto && m.alias === active}
+            marked={isAuto && m.alias === active}
             disabled={pending}
             onSelect={() => onSelect(m.alias)}
             onChat={() => onChat(m.alias)}
@@ -715,6 +801,7 @@ function TierGroup({
 function ModelRow({
   alias,
   isActive,
+  marked = false,
   disabled,
   onSelect,
   onChat,
@@ -723,6 +810,8 @@ function ModelRow({
 }: {
   alias: string;
   isActive: boolean;
+  /** What "auto" currently resolves to — shown, but the tick sits on auto. */
+  marked?: boolean;
   disabled?: boolean;
   onSelect?: () => void;
   onChat: () => void;
@@ -743,7 +832,7 @@ function ModelRow({
               style={{ width: "2ch" }}
               className={`shrink-0 ${isActive ? "text-accent" : "text-dim"}`}
             >
-              {isActive ? "✓" : ""}
+              {isActive ? "✓" : marked ? "·" : ""}
             </span>
           )}
           <span
@@ -836,6 +925,103 @@ function RangeToggle({
   );
 }
 
+function sumTotals(rows: Totals[]): Totals {
+  return rows.reduce<Totals>(
+    (acc, r) => ({
+      tokens: acc.tokens + r.tokens,
+      input: acc.input + r.input,
+      output: acc.output + r.output,
+      cache_read: acc.cache_read + r.cache_read,
+      cache_write: acc.cache_write + r.cache_write,
+      requests: acc.requests + r.requests,
+    }),
+    { tokens: 0, input: 0, output: 0, cache_read: 0, cache_write: 0, requests: 0 },
+  );
+}
+
+/**
+ * Headline usage for the selected range.
+ *
+ * `tokens` is input + output — context that was actually processed or
+ * generated. Prompt-cache reads are reported separately rather than folded in:
+ * Claude Code re-sends its whole conversation every turn and serves most of it
+ * from cache, so summing raw prompt tokens reads an order of magnitude higher
+ * than anything that was really consumed.
+ */
+function UsageMetrics({ usage, range }: { usage: UsageSummary; range: Range }) {
+  const t =
+    range === "24h"
+      ? usage.last_24h
+      : sumTotals(usage.daily.slice(range === "7d" ? -7 : -30));
+  const promptTotal = t.input + t.cache_read + t.cache_write;
+  const cachePct = promptTotal > 0 ? Math.round((t.cache_read / promptTotal) * 100) : 0;
+
+  return (
+    <div className="mb-5">
+      <MetricRow
+        label="tokens"
+        value={formatN(t.tokens)}
+        detail={`in ${formatN(t.input)} · out ${formatN(t.output)}`}
+        title="new input + generated output. Prompt-cache reads are counted on the next line, not here."
+      />
+      <MetricRow
+        label="cache"
+        value={formatN(t.cache_read)}
+        detail={
+          `read · ${formatN(t.cache_write)} written` +
+          (cachePct > 0 ? ` · ${cachePct}% of prompt served from cache` : "")
+        }
+        title="prompt-cache traffic. Billed at a fraction of fresh input on the Anthropic API; on Copilot it costs you nothing extra."
+      />
+      <MetricRow
+        label="calls"
+        value={formatN(t.requests)}
+        detail={
+          usage.avg_ttft_ms > 0
+            ? `${(usage.avg_ttft_ms / 1000).toFixed(1)}s mean ttft (24h)`
+            : ""
+        }
+        title="completions only — count_tokens probes and other non-generation calls are excluded"
+      />
+      {/* Spelled out because the obvious sanity check is against Claude Code's
+          own /usage, which reports a single session - these totals cover every
+          call through the proxy in the selected window, including earlier
+          claudio runs, the smoke test and the chat panel. */}
+      <div className="mt-2 text-[11px] text-dim">
+        {RANGE_LABEL[range]} · all traffic through the proxy, not one claude
+        session · buckets in {usage.tz}
+      </div>
+    </div>
+  );
+}
+
+function MetricRow({
+  label,
+  value,
+  detail,
+  title,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  title: string;
+}) {
+  return (
+    <div
+      className="flex items-baseline gap-6 py-[3px] border-b border-hairline last:border-b-0 cursor-help"
+      title={title}
+    >
+      <span style={{ width: "10ch" }} className="shrink-0 text-muted">
+        {label}
+      </span>
+      <span style={{ width: "9ch" }} className="shrink-0 text-fg tabular-nums">
+        {value}
+      </span>
+      <span className="text-dim truncate min-w-0 flex-1 tabular-nums">{detail}</span>
+    </div>
+  );
+}
+
 function UsageHeatmap({
   usage,
   range,
@@ -845,7 +1031,10 @@ function UsageHeatmap({
 }) {
   // Pick rows. For 24h we synthesize a single-day view from `hourly` so the
   // user still gets a valid heatmap without a special case downstream.
-  const rows: { label: string; cells: { tokens: number; requests: number }[] }[] =
+  const rows: {
+    label: string;
+    cells: { tokens: number; requests: number; cache: number }[];
+  }[] =
     range === "24h"
       ? [
           {
@@ -853,6 +1042,7 @@ function UsageHeatmap({
             cells: usage.hourly.map((h) => ({
               tokens: h.tokens,
               requests: h.requests,
+              cache: h.cache_read + h.cache_write,
             })),
           },
         ]
@@ -862,6 +1052,7 @@ function UsageHeatmap({
             cells: d.tokens_by_hour.map((tokens, h) => ({
               tokens,
               requests: d.requests_by_hour[h],
+              cache: d.cache_by_hour[h],
             })),
           }),
         );
@@ -893,6 +1084,7 @@ function UsageHeatmap({
                 key={h}
                 tokens={cell.tokens}
                 requests={cell.requests}
+                cache={cell.cache}
                 max={max}
                 hour={h}
                 date={range === "24h" ? "" : row.label}
@@ -926,12 +1118,14 @@ function HeatmapHourAxis() {
 function HeatmapCell({
   tokens,
   requests,
+  cache,
   max,
   hour,
   date,
 }: {
   tokens: number;
   requests: number;
+  cache: number;
   max: number;
   hour: number;
   date: string;
@@ -945,7 +1139,8 @@ function HeatmapCell({
   const hh = String(hour).padStart(2, "0");
   const tooltip = tokens === 0
     ? `${date ? `${date} ` : ""}${hh}:00 — no activity`
-    : `${date ? `${date} ` : ""}${hh}:00 — ${formatN(tokens)} tok · ${formatN(requests)} req`;
+    : `${date ? `${date} ` : ""}${hh}:00 — ${formatN(tokens)} tok · ` +
+      `${formatN(cache)} cached · ${formatN(requests)} req`;
   return (
     <div
       title={tooltip}
@@ -992,7 +1187,7 @@ function FallbackList({
   );
 }
 
-function RecentRow({ call }: { call: { ts: string; model: string; total_tokens: number; status: string; duration_ms: number } }) {
+function RecentRow({ call }: { call: RecentCall }) {
   const t = new Date(call.ts);
   const time = isNaN(t.getTime())
     ? "—"
@@ -1003,26 +1198,45 @@ function RecentRow({ call }: { call: { ts: string; model: string; total_tokens: 
       <span
         style={{ width: "10ch" }}
         className="shrink-0 text-muted tabular-nums"
-        // Server formats in the container's timezone (UTC); client uses the
-        // user's local zone. The value is "correct" on both sides, just
-        // differently rendered — suppress the hydration warning rather than
-        // forcing UTC everywhere.
+        // SSR renders in the container's zone; the client renders in the
+        // browser's, which is also what the buckets above are anchored to
+        // after the first fetch. Both are "correct", just different, so
+        // suppress rather than force one.
         suppressHydrationWarning
       >
         {time}
       </span>
       <span className="text-fg truncate min-w-0 flex-1">{call.model}</span>
       <span
-        style={{ width: "10ch" }}
+        style={{ width: "13ch" }}
         className="shrink-0 text-right text-muted tabular-nums"
+        title={`${call.input_tokens} new input · ${call.output_tokens} output · ${call.cache_read_tokens} served from cache`}
       >
-        {formatN(call.total_tokens)} tok
+        {formatN(call.input_tokens)}/{formatN(call.output_tokens)}
+      </span>
+      <span
+        style={{ width: "8ch" }}
+        className="shrink-0 text-right text-dim tabular-nums"
+        title="prompt-cache read"
+      >
+        {call.cache_read_tokens > 0 ? `+${formatN(call.cache_read_tokens)}` : "—"}
       </span>
       <span
         style={{ width: "8ch" }}
         className="shrink-0 text-right text-muted tabular-nums"
+        // For a streamed answer the wall clock measures how long the model
+        // talked for, which isn't latency. Show time-to-first-token instead.
+        title={
+          call.stream && call.ttft_ms > 0
+            ? `time to first token; full stream took ${call.duration_ms}ms`
+            : "round trip"
+        }
       >
-        {call.duration_ms > 0 ? `${call.duration_ms}ms` : "—"}
+        {call.stream && call.ttft_ms > 0
+          ? `${call.ttft_ms}ms`
+          : call.duration_ms > 0
+            ? `${call.duration_ms}ms`
+            : "—"}
       </span>
       <span
         style={{ width: "4ch" }}

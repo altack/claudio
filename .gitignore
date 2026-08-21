@@ -29,3 +29,7 @@ data/
 
 # Claude Code per-developer state (permissions, project notes)
 .claude/
+
+# Python bytecode (spend_logger / generate_config are imported when tested locally)
+__pycache__/
+*.pyc

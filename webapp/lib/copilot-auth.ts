@@ -10,8 +10,8 @@
 // so the polling endpoint can pick up where /login left off.
 
 import { promises as fs } from "node:fs";
-import { spawn } from "node:child_process";
 import path from "node:path";
+import { restartLitellm } from "./supervisor";
 import {
   COPILOT_API_KEY_URL,
   COPILOT_CLIENT_ID,
@@ -24,6 +24,9 @@ const ACCESS_TOKEN_FILE = "access-token";
 const API_KEY_FILE = "api-key.json";
 const PENDING_FILE = ".pending.json";
 
+// Copilot's endpoints reject requests that don't look like the official VS
+// Code client. Kept in lockstep with EDITOR_HEADERS in
+// litellm/generate_config.py — if one is bumped, bump both.
 const editorHeaders = {
   "editor-version": "vscode/1.85.1",
   "editor-plugin-version": "copilot-chat/0.12.0",
@@ -202,28 +205,13 @@ export async function pollDeviceFlow(): Promise<PollResult> {
   // API key in one shot, so a successful poll leaves the proxy fully ready.
   await fs.writeFile(tokenPath(ACCESS_TOKEN_FILE), body.access_token, "utf8");
   await refreshCopilotApiKey(body.access_token);
-  // LiteLLM registers github_copilot/* deployments at startup against whatever
-  // tokens existed then. If we boot before the user authorises, those
-  // deployments are never registered. Restarting after we have valid tokens
-  // is the simplest way to get the router into a sane state.
+  // Two reasons to restart: LiteLLM registers github_copilot/* deployments at
+  // startup against whatever tokens existed then, and litellm-start.sh
+  // re-runs generate_config.py on each start — so this is also the moment the
+  // model catalog gets discovered from Copilot for the first time.
   await restartLitellm();
   await safeUnlink(tokenPath(PENDING_FILE));
   return { status: "authorized" };
-}
-
-function restartLitellm(): Promise<void> {
-  return new Promise((resolve) => {
-    const proc = spawn(
-      "supervisorctl",
-      ["-c", "/etc/supervisor/supervisord.conf", "restart", "litellm"],
-      { stdio: "ignore" },
-    );
-    // Best-effort: don't block / fail auth if supervisor isn't reachable.
-    const done = () => resolve();
-    proc.on("close", done);
-    proc.on("error", done);
-    setTimeout(done, 5000);
-  });
 }
 
 async function refreshCopilotApiKey(accessToken: string): Promise<void> {

@@ -1,0 +1,30 @@
+# LiteLLM proxy config - BASE.
+#
+# This file carries everything except `model_list`. The model list is
+# generated at proxy start by litellm/generate_config.py from GitHub
+# Copilot's live /models catalog, and the merged result is written to
+# /data/litellm/config.generated.yaml - which is what LiteLLM actually
+# boots against (see supervisor/litellm-start.sh).
+#
+# Don't hand-add a `model_list` here; the generator would overwrite it.
+# To change which Copilot models get surfaced, edit generate_config.py.
+
+# Master key gates the admin API and is what the wrapper sends as
+# ANTHROPIC_AUTH_TOKEN. Pulled from the env at startup.
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  store_model_in_db: false
+  # No `database_url` here. LiteLLM's persistent spend tracking requires
+  # Prisma, which isn't in the [proxy] extra and brings in a Node-side
+  # `prisma generate` step. For v1 we keep the image lean - spend history
+  # comes from our own JSONL callback instead (see spend_logger.py).
+
+litellm_settings:
+  # Drop OpenAI-only params Anthropic clients send that Copilot rejects.
+  drop_params: true
+  set_verbose: false
+  # Custom callback that appends each request as JSONL to /data/litellm/spend.jsonl
+  # so the dashboard has historic data without needing Prisma.
+  # Resolved as `import spend_logger; spend_logger.proxy_handler_instance`,
+  # which requires PYTHONPATH=/etc/litellm (set in the Dockerfile).
+  callbacks: spend_logger.proxy_handler_instance

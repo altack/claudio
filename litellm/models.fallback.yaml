@@ -1,0 +1,70 @@
+# Bundled snapshot of GitHub Copilot's /models catalog.
+#
+# Used ONLY when generate_config.py can't reach Copilot's live catalog and
+# has no cached copy at /data/litellm/models.cache.json - i.e. a fresh
+# install that boots before the user has signed in. Same shape as the live
+# response so the generator has a single code path.
+#
+# This is a floor, not a source of truth: once the user authenticates, the
+# webapp restarts LiteLLM and the live catalog takes over. Refresh this
+# snapshot occasionally so an unauthenticated boot isn't hopelessly stale.
+data:
+  # ---- Anthropic (the ones claudio exists for) --------------------------
+  - id: claude-opus-5
+    vendor: Anthropic
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: claude-opus-4.8
+    vendor: Anthropic
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: claude-opus-4.7
+    vendor: Anthropic
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: claude-opus-4.6
+    vendor: Anthropic
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: claude-opus-4.5
+    vendor: Anthropic
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: claude-sonnet-5
+    vendor: Anthropic
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: claude-sonnet-4.6
+    vendor: Anthropic
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: claude-sonnet-4.5
+    vendor: Anthropic
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: claude-haiku-4.5
+    vendor: Anthropic
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: claude-fable-5
+    vendor: Anthropic
+    model_picker_enabled: true
+    capabilities: {type: chat}
+
+  # ---- Non-Anthropic fallbacks, surfaced as claude-via-* ----------------
+  - id: gpt-5.4
+    vendor: OpenAI
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: gpt-5.3-codex
+    vendor: OpenAI
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: gpt-5-mini
+    vendor: OpenAI
+    model_picker_enabled: true
+    capabilities: {type: chat}
+  - id: gemini-3.1-pro-preview
+    vendor: Google
+    model_picker_enabled: true
+    capabilities: {type: chat}

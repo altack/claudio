@@ -1,3 +1,7 @@
 # Shell scripts must keep LF on Windows checkouts — CRLF breaks the
 # `#!/usr/bin/env bash` line on Linux with "bad interpreter" errors.
 *.sh text eol=lf
+
+# Fonts are binary; an autocrlf setting that decided otherwise would
+# corrupt them on checkout.
+*.woff2 binary
